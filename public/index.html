@@ -1,36 +1,98 @@
 <!DOCTYPE html>
 <html style="height:100%; margin:0;">
-
 <head>
-  <title>Strangereal Atlas</title>
+  <title>Strangereal Atlas - 3D Holographic Interface</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
   <meta content="utf-8" http-equiv="encoding">
   <link rel="icon" href="favicon.ico" type="image/x-icon" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
-    integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
-    crossorigin="" />
-  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
-    integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
-    crossorigin=""></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
-    integrity="sha512-gc3xjCmIy673V6MyOAZhIW93xhM9ei1I+gLbmFjUHIjocENRsLX/QUE1htk5q1XV2D/iie/VQ8DXI6Vu8bexvQ=="
-    crossorigin="anonymous" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"
-    integrity="sha512-ozq8xQKq6urvuU6jNgkfqAmT7jKN2XumbrX1JiB3TnF7tI48DPI4Gy1GXKD/V3EExgAs1V+pRO7vwtS1LHg0Gw=="
-    crossorigin="anonymous"></script>
-  <link rel="stylesheet" href="./styles/leaflet-search.css" />
-  <link rel="stylesheet" href="./styles/index.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Orbitron', 'Courier New', monospace;
+    }
+    #canvas-container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+    #hud {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      color: #0cf;
+      font-size: 14px;
+      text-shadow: 0 0 10px #0cf;
+      z-index: 100;
+      pointer-events: none;
+    }
+    #info-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      max-width: 400px;
+      background: rgba(0, 20, 40, 0.8);
+      border: 2px solid #0cf;
+      padding: 15px;
+      color: #0cf;
+      text-shadow: 0 0 5px #0cf;
+      box-shadow: 0 0 20px rgba(0, 200, 255, 0.5);
+      display: none;
+      z-index: 100;
+    }
+    #info-panel h2 {
+      margin: 0 0 10px 0;
+      color: #f0f;
+      text-shadow: 0 0 10px #f0f;
+    }
+    .scan-line {
+      position: absolute;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(to right, transparent, #0cf, transparent);
+      animation: scan 4s linear infinite;
+      pointer-events: none;
+      opacity: 0.3;
+      z-index: 50;
+    }
+    @keyframes scan {
+      0% { top: 0; }
+      100% { top: 100%; }
+    }
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #0cf;
+      font-size: 24px;
+      text-shadow: 0 0 20px #0cf;
+      z-index: 200;
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
 </head>
-
-<body style="height:100%; margin:0;">
-  <div id="map" style="width:100%; height:100%; background:#FFF; margin:0;"></div>
-  <script src="./js/leaflet-search.min.js" type="text/javascript"></script>
-  <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.4.2"></script>
-  <script src="./js/api.js" type="text/javascript"></script>
-  <script src="./js/geodesy.js" type="text/javascript"></script>
-  <script src="./js/strangereal.js" type="text/javascript"></script>
-  <script src="./js/index.js" type="text/javascript"></script>
+<body>
+  <div id="canvas-container">
+    <div id="loading">INITIALIZING HOLOGRAPHIC INTERFACE...</div>
+    <div class="scan-line"></div>
+  </div>
+  <div id="hud">
+    <div>STRANGEREAL ATLAS v2.0</div>
+    <div>HOLOGRAPHIC DISPLAY ACTIVE</div>
+    <div id="coords"></div>
+  </div>
+  <div id="info-panel"></div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // OrbitControls for Three.js r128
+    !function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports,require("three")):"function"==typeof define&&define.amd?define(["exports","three"],e):e((t="undefined"!=typeof globalThis?globalThis:t||self).THREE=t.THREE||{},t.THREE)}(this,(function(t,e){"use strict";var i={type:"change"},n={type:"start"},o={type:"end"},r=new e.Vector3,s=(new e.Quaternion,new e.Vector3);function a(t,a){void 0===a&&(a=document),this.object=t,this.domElement=a,this.enabled=!0,this.target=new e.Vector3,this.minDistance=0,this.maxDistance=1/0,this.minZoom=0,this.maxZoom=1/0,this.minPolarAngle=0,this.maxPolarAngle=Math.PI,this.minAzimuthAngle=-1/0,this.maxAzimuthAngle=1/0,this.enableDamping=!1,this.dampingFactor=.05,this.enableZoom=!0,this.zoomSpeed=1,this.enableRotate=!0,this.rotateSpeed=1,this.enablePan=!0,this.panSpeed=1,this.screenSpacePanning=!0,this.keyPanSpeed=7,this.autoRotate=!1,this.autoRotateSpeed=2,this.keys={LEFT:"ArrowLeft",UP:"ArrowUp",RIGHT:"ArrowRight",BOTTOM:"ArrowDown"},this.mouseButtons={LEFT:e.MOUSE.ROTATE,MIDDLE:e.MOUSE.DOLLY,RIGHT:e.MOUSE.PAN},this.touches={ONE:e.TOUCH.ROTATE,TWO:e.TOUCH.DOLLY_PAN},this.target0=this.target.clone(),this.position0=this.object.position.clone(),this.zoom0=this.object.zoom,this._domElementKeyEvents=null,this.getPolarAngle=function(){return c.phi},this.getAzimuthalAngle=function(){return c.theta},this.getDistance=function(){return this.object.position.distanceTo(this.target)},this.listenToKeyEvents=function(t){t.addEventListener("keydown",Z),this._domElementKeyEvents=t},this.saveState=function(){h.target0.copy(h.target),h.position0.copy(h.object.position),h.zoom0=h.object.zoom},this.reset=function(){h.target.copy(h.target0),h.object.position.copy(h.position0),h.object.zoom=h.zoom0,h.object.updateProjectionMatrix(),h.dispatchEvent(i),h.update(),l=d.NONE},this.update=function(){var t=new e.Vector3,a=(new e.Quaternion).setFromUnitVectors(h.object.up,new e.Vector3(0,1,0)),u=a.clone().invert(),m=new e.Vector3,p=new e.Quaternion,g=2*Math.PI;return function(){var v=h.object.position;t.copy(v).sub(h.target),t.applyQuaternion(a),c.setFromVector3(t),h.autoRotate&&l===d.NONE&&E(2*Math.PI/60/60*h.autoRotateSpeed),h.enableDamping?(c.theta+=f.theta*h.dampingFactor,c.phi+=f.phi*h.dampingFactor):(c.theta+=f.theta,c.phi+=f.phi);var y=h.minAzimuthAngle,M=h.maxAzimuthAngle;return isFinite(y)&&isFinite(M)&&(y<-Math.PI?y+=g:y>Math.PI&&(y-=g),M<-Math.PI?M+=g:M>Math.PI&&(M-=g),y<=M?c.theta=Math.max(y,Math.min(M,c.theta)):c.theta=c.theta>(y+M)/2?Math.max(y,c.theta):Math.min(M,c.theta)),c.phi=Math.max(h.minPolarAngle,Math.min(h.maxPolarAngle,c.phi)),c.makeSafe(),c.radius*=b,c.radius=Math.max(h.minDistance,Math.min(h.maxDistance,c.radius)),!0===h.enableDamping?h.target.addScaledVector(w,h.dampingFactor):h.target.add(w),t.setFromSpherical(c),t.applyQuaternion(u),v.copy(h.target).add(t),h.object.lookAt(h.target),!0===h.enableDamping?(f.theta*=1-h.dampingFactor,f.phi*=1-h.dampingFactor,w.multiplyScalar(1-h.dampingFactor)):(f.set(0,0,0),w.set(0,0,0)),b=1,!!(D||m.distanceToSquared(h.object.position)>T||8*(1-p.dot(h.object.quaternion))>T)&&(h.dispatchEvent(i),m.copy(h.object.position),p.copy(h.object.quaternion),D=!1,!0)}}(),this.dispose=function(){h.domElement.removeEventListener("contextmenu",_),h.domElement.removeEventListener("pointerdown",Y),h.domElement.removeEventListener("pointercancel",q),h.domElement.removeEventListener("wheel",tt),h.domElement.removeEventListener("pointermove",O),h.domElement.removeEventListener("pointerup",q),null!==h._domElementKeyEvents&&(h._domElementKeyEvents.removeEventListener("keydown",Z),h._domElementKeyEvents=null)};var h=this,d={NONE:-1,ROTATE:0,DOLLY:1,PAN:2,TOUCH_ROTATE:3,TOUCH_PAN:4,TOUCH_DOLLY_PAN:5,TOUCH_DOLLY_ROTATE:6},l=d.NONE,T=1e-6,c=new e.Spherical,f=new e.Spherical,b=1,w=new e.Vector3,D=!1,E=function(t){f.theta-=t},P=function(){var t=new e.Vector3;return function(e){t.setFromMatrixColumn(h.object.matrix,0),t.multiplyScalar(-e),w.add(t)}}(),A=function(){var t=new e.Vector3;return function(e){!0===h.screenSpacePanning?t.setFromMatrixColumn(h.object.matrix,1):(t.setFromMatrixColumn(h.object.matrix,0),t.crossVectors(h.object.up,t)),t.multiplyScalar(e),w.add(t)}}(),R=function(){var t=new e.Vector3;return function(e,i){var n=h.domElement;if(h.object.isPerspectiveCamera){var o=h.object.position;t.copy(o).sub(h.target);var r=t.length();r*=Math.tan(h.object.fov/2*Math.PI/180),P(2*e*r/n.clientHeight),A(2*i*r/n.clientHeight)}else h.object.isOrthographicCamera?(P(e*(h.object.right-h.object.left)/h.object.zoom/n.clientWidth),A(i*(h.object.top-h.object.bottom)/h.object.zoom/n.clientHeight)):(console.warn("WARNING: OrbitControls.js encountered an unknown camera type - pan disabled."),h.enablePan=!1)}}();function V(t){h.object.isPerspectiveCamera?b/=t:h.object.isOrthographicCamera?(h.object.zoom=Math.max(h.minZoom,Math.min(h.maxZoom,h.object.zoom*t)),h.object.updateProjectionMatrix(),D=!0):(console.warn("WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled."),h.enableZoom=!1)}function S(t){h.object.isPerspectiveCamera?b*=t:h.object.isOrthographicCamera?(h.object.zoom=Math.max(h.minZoom,Math.min(h.maxZoom,h.object.zoom/t)),h.object.updateProjectionMatrix(),D=!0):(console.warn("WARNING: OrbitControls.js encountered an unknown camera type - dolly/zoom disabled."),h.enableZoom=!1)}function U(t){z.set(t.clientX,t.clientY)}function C(t){N.set(t.clientX,t.clientY)}function L(t){k.set(t.clientX,t.clientY)}function G(t){I.set(t.clientX,t.clientY),F.subVectors(I,z).multiplyScalar(h.rotateSpeed);var e=h.domElement;E(2*Math.PI*F.x/e.clientHeight),function(t){f.phi-=t}(2*Math.PI*F.y/e.clientHeight),z.copy(I),h.update()}function B(t){H.set(t.clientX,t.clientY),X.subVectors(H,N),X.y>0?V(x()):X.y<0&&S(x()),N.copy(H),h.update()}function j(t){W.set(t.clientX,t.clientY),J.subVectors(W,k).multiplyScalar(h.panSpeed),R(J.x,J.y),k.copy(W),h.update()}function K(t){t.deltaY<0?S(x()):t.deltaY>0&&V(x()),h.update()}function Q(t){var e=!1;switch(t.code){case h.keys.UP:t.ctrlKey||t.metaKey||t.shiftKey?f.phi-=2*Math.PI*h.rotateSpeed/h.domElement.clientHeight:R(0,h.keyPanSpeed),e=!0;break;case h.keys.BOTTOM:t.ctrlKey||t.metaKey||t.shiftKey?f.phi+=2*Math.PI*h.rotateSpeed/h.domElement.clientHeight:R(0,-h.keyPanSpeed),e=!0;break;case h.keys.LEFT:t.ctrlKey||t.metaKey||t.shiftKey?f.theta-=2*Math.PI*h.rotateSpeed/h.domElement.clientHeight:R(h.keyPanSpeed,0),e=!0;break;case h.keys.RIGHT:t.ctrlKey||t.metaKey||t.shiftKey?f.theta+=2*Math.PI*h.rotateSpeed/h.domElement.clientHeight:R(-h.keyPanSpeed,0),e=!0}e&&(t.preventDefault(),h.update())}function $(t){1==t.touches.length?z.set(t.touches[0].pageX,t.touches[0].pageY):(tt.set(.5*(t.touches[0].pageX+t.touches[1].pageX),.5*(t.touches[0].pageY+t.touches[1].pageY)),et.set(t.touches[0].pageX-t.touches[1].pageX,t.touches[0].pageY-t.touches[1].pageY))}function tt(t){if(!1!==h.enabled)switch(t.preventDefault(),t.stopPropagation(),t.touches.length){case 1:switch(h.touches.ONE){case e.TOUCH.ROTATE:if(!1===h.enableRotate)return;$(t),l=d.TOUCH_ROTATE;break;case e.TOUCH.PAN:if(!1===h.enablePan)return;$(t),l=d.TOUCH_PAN;break;default:l=d.NONE}break;case 2:switch(h.touches.TWO){case e.TOUCH.DOLLY_PAN:if(!1===h.enableZoom&&!1===h.enablePan)return;!function(t){h.enableZoom&&function(t){var e=t.touches[0].pageX-t.touches[1].pageX,i=t.touches[0].pageY-t.touches[1].pageY,n=Math.sqrt(e*e+i*i);N.set(0,n)}(t),h.enablePan&&$(t)}(t),l=d.TOUCH_DOLLY_PAN;break;case e.TOUCH.DOLLY_ROTATE:if(!1===h.enableZoom&&!1===h.enableRotate)return;!function(t){h.enableZoom&&function(t){var e=t.touches[0].pageX-t.touches[1].pageX,i=t.touches[0].pageY-t.touches[1].pageY,n=Math.sqrt(e*e+i*i);N.set(0,n)}(t),h.enableRotate&&$(t)}(t),l=d.TOUCH_DOLLY_ROTATE;break;default:l=d.NONE}break;default:l=d.NONE}l!==d.NONE&&h.dispatchEvent(n)}function et(t){switch(t.touches.length){case 1:switch(h.touches.ONE){case e.TOUCH.ROTATE:if(!1===h.enableRotate)return;!function(t){I.set(t.touches[0].pageX,t.touches[0].pageY),F.subVectors(I,z).multiplyScalar(h.rotateSpeed);var e=h.domElement;E(2*Math.PI*F.x/e.clientHeight),function(t){f.phi-=t}(2*Math.PI*F.y/e.clientHeight),z.copy(I),h.update()}(t),l=d.TOUCH_ROTATE;break;case e.TOUCH.PAN:if(!1===h.enablePan)return;!function(t){W.set(t.touches[0].pageX,t.touches[0].pageY),J.subVectors(W,k).multiplyScalar(h.panSpeed),R(J.x,J.y),k.copy(W),h.update()}(t),l=d.TOUCH_PAN;break;default:l=d.NONE}break;case 2:switch(h.touches.TWO){case e.TOUCH.DOLLY_PAN:if(!1===h.enableZoom&&!1===h.enablePan)return;!function(t){h.enableZoom&&function(t){var e=t.touches[0].pageX-t.touches[1].pageX,i=t.touches[0].pageY-t.touches[1].pageY,n=Math.sqrt(e*e+i*i);H.set(0,n),X.set(0,Math.pow(H.y/N.y,h.zoomSpeed)),V(X.y),N.copy(H)}(t),h.enablePan&&function(t){et.set(.5*(t.touches[0].pageX+t.touches[1].pageX),.5*(t.touches[0].pageY+t.touches[1].pageY)),it.subVectors(et,tt).multiplyScalar(h.panSpeed),R(it.x,it.y),tt.copy(et)}(t)}(t),l=d.TOUCH_DOLLY_PAN;break;case e.TOUCH.DOLLY_ROTATE:if(!1===h.enableZoom&&!1===h.enableRotate)return;!function(t){h.enableZoom&&function(t){var e=t.touches[0].pageX-t.touches[1].pageX,i=t.touches[0].pageY-t.touches[1].pageY,n=Math.sqrt(e*e+i*i);H.set(0,n),X.set(0,Math.pow(H.y/N.y,h.zoomSpeed)),V(X.y),N.copy(H)}(t),h.enableRotate&&function(t){I.set(.5*(t.touches[0].pageX+t.touches[1].pageX),.5*(t.touches[0].pageY+t.touches[1].pageY)),F.subVectors(I,z).multiplyScalar(h.rotateSpeed);var e=h.domElement;E(2*Math.PI*F.x/e.clientHeight),function(t){f.phi-=t}(2*Math.PI*F.y/e.clientHeight),z.copy(I)}(t)}(t),l=d.TOUCH_DOLLY_ROTATE;break;default:l=d.NONE}break;default:l=d.NONE}}function it(t){!1!==h.enabled&&t.preventDefault()}function nt(t){l===d.NONE&&(l=t)}function ot(t){switch(t.button){case 0:return h.mouseButtons.LEFT;case 1:return h.mouseButtons.MIDDLE;case 2:return h.mouseButtons.RIGHT;default:return-1}}function rt(t){switch(t.button){case h.mouseButtons.LEFT:return d.ROTATE;case h.mouseButtons.MIDDLE:return d.DOLLY;case h.mouseButtons.RIGHT:return d.PAN}}function st(t){nt(rt(t))}var at,ht,dt,lt,Tt,ct=new e.Vector2,ft=new e.Vector2,bt=new e.Vector2,wt=new e.Vector2;function Dt(t){if(1==t.pointers.length)ct.set(t.pointers[0].pageX,t.pointers[0].pageY);else{var e=.5*(t.pointers[0].pageX+t.pointers[1].pageX),i=.5*(t.pointers[0].pageY+t.pointers[1].pageY);ct.set(e,i)}}function Et(t){if(1==t.pointers.length)ft.set(t.pointers[0].pageX,t.pointers[0].pageY);else{var e=.5*(t.pointers[0].pageX+t.pointers[1].pageX),i=.5*(t.pointers[0].pageY+t.pointers[1].pageY);ft.set(e,i)}}function Pt(t){var e=t.pointers[0].pageX-t.pointers[1].pageX,i=t.pointers[0].pageY-t.pointers[1].pageY,n=Math.sqrt(e*e+i*i);bt.set(0,n)}function At(t){var e=t.pointers[0].pageX-t.pointers[1].pageX,i=t.pointers[0].pageY-t.pointers[1].pageY,n=Math.sqrt(e*e+i*i);wt.set(0,n),at=wt.clone().sub(bt).multiplyScalar(h.zoomSpeed),V(at.y),bt.copy(wt)}var Rt,Vt,St,Ut,Ct,Lt=new e.Vector2,Gt=new e.Vector2,Bt=new e.Vector2,jt=new e.Vector2;function Kt(t){if(1==t.pointers.length)Lt.set(t.pointers[0].pageX,t.pointers[0].pageY);else{var e=.5*(t.pointers[0].pageX+t.pointers[1].pageX),i=.5*(t.pointers[0].pageY+t.pointers[1].pageY);Lt.set(e,i)}}function Qt(t){if(1==t.pointers.length)Gt.set(t.pointers[0].pageX,t.pointers[0].pageY);else{var e=.5*(t.pointers[0].pageX+t.pointers[1].pageX),i=.5*(t.pointers[0].pageY+t.pointers[1].pageY);Gt.set(e,i)}}var $t,te,ee,ie,ne=new e.Vector2,oe=new e.Vector2;function re(t){if(1==t.pointers.length)ne.set(t.pointers[0].pageX,t.pointers[0].pageY);else{var e=.5*(t.pointers[0].pageX+t.pointers[1].pageX),i=.5*(t.pointers[0].pageY+t.pointers[1].pageY);ne.set(e,i)}}function se(t){if(1==t.pointers.length)oe.set(t.pointers[0].pageX,t.pointers[0].pageY);else{var e=.5*(t.pointers[0].pageX+t.pointers[1].pageX),i=.5*(t.pointers[0].pageY+t.pointers[1].pageY);oe.set(e,i)}}var ae,he,de,le;function Te(){!1!==h.enabled&&h.domElement.addEventListener("pointermove",O)}function ce(){h.domElement.removeEventListener("pointermove",O),h.dispatchEvent(o),l=d.NONE}function fe(){h.enabled=!0}function be(t){!1!==h.enabled&&(0===t.button&&(h.domElement.setPointerCapture(t.pointerId),h.domElement.addEventListener("pointermove",O),h.domElement.addEventListener("pointerup",q),function(t){switch(ot(t)){case e.MOUSE.DOLLY:if(!1===h.enableZoom)return;!function(t){H.set(t.clientX,t.clientY)}(t),l=d.DOLLY;break;case e.MOUSE.ROTATE:if(t.ctrlKey||t.metaKey||t.shiftKey){if(!1===h.enablePan)return;L(t),l=d.PAN}else{if(!1===h.enableRotate)return;U(t),l=d.ROTATE}break;case e.MOUSE.PAN:if(t.ctrlKey||t.metaKey||t.shiftKey){if(!1===h.enableRotate)return;U(t),l=d.ROTATE}else{if(!1===h.enablePan)return;L(t),l=d.PAN}break;default:l=d.NONE}l!==d.NONE&&h.dispatchEvent(n)}(t)))}function we(t){!1!==h.enabled&&(function(t){switch(ot(t)){case e.MOUSE.DOLLY:if(!1===h.enableZoom)return;B(t);break;case e.MOUSE.ROTATE:if(!1===h.enableRotate)return;G(t);break;case e.MOUSE.PAN:if(!1===h.enablePan)return;j(t)}}(t),h.update())}function De(){h.domElement.releasePointerCapture(t.pointerId),h.domElement.removeEventListener("pointermove",O),h.domElement.removeEventListener("pointerup",q),h.dispatchEvent(o),l=d.NONE}function Ee(t){K(t),h.update()}function Pe(){if(!1!==h.enabled){switch(t.pointers.length){case 1:switch(h.touches.ONE){case e.TOUCH.ROTATE:if(!1===h.enableRotate)return;Dt(t),l=d.TOUCH_ROTATE;break;case e.TOUCH.PAN:if(!1===h.enablePan)return;Et(t),l=d.TOUCH_PAN;break;default:l=d.NONE}break;case 2:switch(h.touches.TWO){case e.TOUCH.DOLLY_PAN:!1!==h.enableZoom&&Pt(t),!1!==h.enablePan&&Et(t),l=d.TOUCH_DOLLY_PAN;break;case e.TOUCH.DOLLY_ROTATE:!1!==h.enableZoom&&Pt(t),!1!==h.enableRotate&&Dt(t),l=d.TOUCH_DOLLY_ROTATE;break;default:l=d.NONE}break;default:l=d.NONE}l!==d.NONE&&h.dispatchEvent(n)}}function Ae(){switch(t.pointers.length){case 0:l=d.NONE;break;case 1:switch(h.touches.ONE){case e.TOUCH.ROTATE:if(!1===h.enableRotate)return;!function(t){ht=ft.clone().sub(ct).multiplyScalar(h.rotateSpeed);var e=h.domElement;E(2*Math.PI*ht.x/e.clientHeight),function(t){f.phi-=t}(2*Math.PI*ht.y/e.clientHeight),ct.copy(ft),h.update()}(t),l=d.TOUCH_ROTATE;break;case e.TOUCH.PAN:if(!1===h.enablePan)return;!function(t){dt=jt.clone().sub(Lt).multiplyScalar(h.panSpeed),R(dt.x,dt.y),Lt.copy(jt),h.update()}(t),l=d.TOUCH_PAN;break;default:l=d.NONE}break;case 2:switch(h.touches.TWO){case e.TOUCH.DOLLY_PAN:!1!==h.enableZoom&&At(t),!1!==h.enablePan&&function(t){lt=Bt.clone().sub(Gt).multiplyScalar(h.panSpeed),R(lt.x,lt.y),Gt.copy(Bt),h.update()}(t),l=d.TOUCH_DOLLY_PAN;break;case e.TOUCH.DOLLY_ROTATE:!1!==h.enableZoom&&At(t),!1!==h.enableRotate&&function(t){Tt=ft.clone().sub(ct).multiplyScalar(h.rotateSpeed);var e=h.domElement;E(2*Math.PI*Tt.x/e.clientHeight),function(t){f.phi-=t}(2*Math.PI*Tt.y/e.clientHeight),ct.copy(ft),h.update()}(t),l=d.TOUCH_DOLLY_ROTATE;break;default:l=d.NONE}break;default:l=d.NONE}}var Re,Ve,Se,Ue,Ce;function Le(){t.preventDefault()}var Ge=new e.Vector2,Be=new e.Vector2,je=new e.Vector2,Ke=new e.Vector2,Qe=new e.Vector2,$e=new e.Vector2,ti=new e.Vector2,ei=new e.Vector2,ii=new e.Vector2,ni=new e.Vector2,oi=new e.Vector2,ri=new e.Vector2;function si(){!1!==h.enabled&&h.domElement.addEventListener("pointermove",O)}function ai(){h.domElement.removeEventListener("pointermove",O),h.dispatchEvent(o),l=d.NONE}function hi(){h.enabled=!0}var di,li,Ti,ci;function fi(){!1!==h.enabled&&(0===t.button&&(h.domElement.setPointerCapture(t.pointerId),h.domElement.addEventListener("pointermove",O),h.domElement.addEventListener("pointerup",q),function(t){switch(ot(t)){case e.MOUSE.DOLLY:if(!1===h.enableZoom)return;di=new e.Vector2(t.clientX,t.clientY),l=d.DOLLY;break;case e.MOUSE.ROTATE:if(t.ctrlKey||t.metaKey||t.shiftKey){if(!1===h.enablePan)return;Ti=new e.Vector2(t.clientX,t.clientY),l=d.PAN}else{if(!1===h.enableRotate)return;li=new e.Vector2(t.clientX,t.clientY),l=d.ROTATE}break;case e.MOUSE.PAN:if(t.ctrlKey||t.metaKey||t.shiftKey){if(!1===h.enableRotate)return;li=new e.Vector2(t.clientX,t.clientY),l=d.ROTATE}else{if(!1===h.enablePan)return;Ti=new e.Vector2(t.clientX,t.clientY),l=d.PAN}break;default:l=d.NONE}l!==d.NONE&&h.dispatchEvent(n)}(t)))}function bi(t){!1!==h.enabled&&(function(t){switch(ot(t)){case e.MOUSE.DOLLY:if(!1===h.enableZoom)return;ci=new e.Vector2(t.clientX,t.clientY),x=ci.clone().sub(di),x.y>0?V(x()):x.y<0&&S(x()),di.copy(ci),h.update();break;case e.MOUSE.ROTATE:if(!1===h.enableRotate)return;var i=new e.Vector2(t.clientX,t.clientY),n=i.clone().sub(li).multiplyScalar(h.rotateSpeed),o=h.domElement;E(2*Math.PI*n.x/o.clientHeight),function(t){f.phi-=t}(2*Math.PI*n.y/o.clientHeight),li.copy(i),h.update();break;case e.MOUSE.PAN:if(!1===h.enablePan)return;var r=new e.Vector2(t.clientX,t.clientY),s=r.clone().sub(Ti).multiplyScalar(h.panSpeed);R(s.x,s.y),Ti.copy(r),h.update()}}(t),h.update())}function wi(){h.domElement.releasePointerCapture(t.pointerId),h.domElement.removeEventListener("pointermove",O),h.domElement.removeEventListener("pointerup",q),h.dispatchEvent(o),l=d.NONE}function Di(t){K(t),h.update()}function Ei(t){!1!==h.enabled&&(0===t.pointers.length?(l=d.NONE,h.domElement.releasePointerCapture(t.pointerId)):1===t.pointers.length?function(t){switch(h.touches.ONE){case e.TOUCH.ROTATE:if(!1===h.enableRotate)return;re(t),l=d.TOUCH_ROTATE;break;case e.TOUCH.PAN:if(!1===h.enablePan)return;se(t),l=d.TOUCH_PAN;break;default:l=d.NONE}}(t):2===t.pointers.length&&function(t){switch(h.touches.TWO){case e.TOUCH.DOLLY_PAN:!1!==h.enableZoom&&(Rt=ri.clone().sub(oi).y,X.set(0,Math.pow(Rt,h.zoomSpeed)),V(X.y),oi.copy(ri)),!1!==h.enablePan&&(Vt=se(t).clone().sub(ne),R(Vt.x,Vt.y),ne.copy(se(t))),l=d.TOUCH_DOLLY_PAN;break;case e.TOUCH.DOLLY_ROTATE:!1!==h.enableZoom&&(Rt=ri.clone().sub(oi).y,X.set(0,Math.pow(Rt,h.zoomSpeed)),V(X.y),oi.copy(ri)),!1!==h.enableRotate&&(St=oe.clone().sub(ne).multiplyScalar(h.rotateSpeed),Ut=h.domElement,E(2*Math.PI*St.x/Ut.clientHeight),Ct=2*Math.PI*St.y/Ut.clientHeight,f.phi-=Ct,ne.copy(oe)),l=d.TOUCH_DOLLY_ROTATE;break;default:l=d.NONE}}(t),h.update())}var Pi;function Ai(t){Le(t)}var Ri=new e.Vector2,Vi=new e.Vector2,Si=new e.Vector2,Ui=new e.Vector2,Ci=new e.Vector2,Li=new e.Vector2,Gi=new e.Vector2,Bi=new e.Vector2,ji=new e.Vector2,Ki=new e.Vector2,Qi=new e.Vector2,$i=new e.Vector2;h.domElement.addEventListener("contextmenu",_),h.domElement.addEventListener("pointerdown",Y),h.domElement.addEventListener("pointercancel",q),h.domElement.addEventListener("wheel",tt,{passive:!1}),this.update()}function h(t,e){if(e===r)return console.warn("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Geometry already defined as triangles."),t;if(e===s||e===a){var i=t.getIndex();if(null===i){var n=[],o=t.getAttribute("position");if(void 0!==o){for(var h=0;h<o.count;h++)n.push(h);t.setIndex(n),i=t.getIndex()}else return console.error("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Undefined position attribute. Processing not possible."),t}var d=i.count-2,l=[];if(e===s)for(h=1;h<=d;h++)l.push(i.getX(0)),l.push(i.getX(h)),l.push(i.getX(h+1));else for(h=0;h<d;h++)h%2==0?(l.push(i.getX(h)),l.push(i.getX(h+1)),l.push(i.getX(h+2))):(l.push(i.getX(h+2)),l.push(i.getX(h+1)),l.push(i.getX(h)));l.length/3!==d&&console.error("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Unable to generate correct amount of triangles.");var T=t.clone();return T.setIndex(l),T.clearGroups(),T}return console.error("THREE.BufferGeometryUtils.toTrianglesDrawMode(): Unknown draw mode:",e),t}return a.prototype=Object.create(e.EventDispatcher.prototype),a.prototype.constructor=a,t.OrbitControls=a,Object.defineProperty(t,"__esModule",{value:!0})}));
+  </script>
+  <script src="./js/api.js"></script>
+  <script src="./js/holo3d.js"></script>
 </body>
-
 </html>
