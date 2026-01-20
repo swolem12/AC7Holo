@@ -134,15 +134,17 @@
     }
 
     function createMapTerrain() {
-        // Create a simple terrain mesh with holographic material
+        // Create a terrain mesh with actual map tiles from TMS
         const geometry = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE, 100, 100);
         
-        // Add some height variation to vertices
+        // Add some height variation to vertices (can be replaced with actual DEM data)
         const positions = geometry.attributes.position;
         for (let i = 0; i < positions.count; i++) {
             const x = positions.getX(i);
             const y = positions.getY(i);
-            const height = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 2;
+            // Procedural height for now - can be replaced with real elevation data
+            const height = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 2 + 
+                          Math.sin(x * 0.05) * Math.cos(y * 0.05) * 3;
             positions.setZ(i, height);
         }
         geometry.computeVertexNormals();
@@ -151,17 +153,20 @@
             uniforms: {
                 time: { value: 0 },
                 mainColor: { value: new THREE.Color(0x0088ff) },
-                accentColor: { value: new THREE.Color(0xff0088) }
+                accentColor: { value: new THREE.Color(0xff0088) },
+                mapTexture: { value: null }
             },
             vertexShader: `
                 varying vec3 vNormal;
                 varying vec3 vPosition;
                 varying float vHeight;
+                varying vec2 vUv;
                 
                 void main() {
                     vNormal = normalize(normalMatrix * normal);
                     vPosition = position;
                     vHeight = position.z;
+                    vUv = uv;
                     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
                 }
             `,
@@ -169,14 +174,22 @@
                 uniform float time;
                 uniform vec3 mainColor;
                 uniform vec3 accentColor;
+                uniform sampler2D mapTexture;
                 varying vec3 vNormal;
                 varying vec3 vPosition;
                 varying float vHeight;
+                varying vec2 vUv;
                 
                 void main() {
+                    // Sample the actual map texture from TMS tiles
+                    vec4 texColor = texture2D(mapTexture, vUv);
+                    
                     // Height-based coloring
-                    float heightFactor = (vHeight + 3.0) / 6.0;
-                    vec3 color = mix(mainColor, accentColor, heightFactor);
+                    float heightFactor = (vHeight + 5.0) / 10.0;
+                    vec3 baseColor = mix(mainColor, accentColor, heightFactor);
+                    
+                    // Blend map texture with holographic effect
+                    vec3 color = mix(texColor.rgb * vec3(0.3, 0.5, 0.7), baseColor, 0.5);
                     
                     // Holographic scan effect
                     float scan = sin(vPosition.y * 0.5 + time * 2.0) * 0.5 + 0.5;
@@ -184,11 +197,12 @@
                     // Fresnel edge glow
                     float fresnel = pow(1.0 - abs(dot(vNormal, vec3(0, 0, 1))), 3.0);
                     
-                    // Combine effects
-                    vec3 finalColor = color * (0.5 + scan * 0.5) + fresnel * accentColor;
+                    // Combine effects with holographic overlay
+                    vec3 holoTint = mainColor * 0.4;
+                    vec3 finalColor = (color + holoTint) * (0.6 + scan * 0.4) + fresnel * accentColor;
                     
-                    // Transparency based on height
-                    float alpha = 0.4 + heightFactor * 0.4 + fresnel * 0.2;
+                    // Transparency
+                    float alpha = 0.5 + heightFactor * 0.3 + fresnel * 0.2;
                     
                     gl_FragColor = vec4(finalColor, alpha);
                 }
@@ -202,6 +216,9 @@
         mapMesh.rotation.x = -Math.PI / 2;
         scene.add(mapMesh);
 
+        // Load the composite map texture from TMS tiles
+        loadMapTileComposite();
+
         // Add wireframe overlay
         const wireframeGeo = geometry.clone();
         const wireframeMat = new THREE.MeshBasicMaterial({
@@ -214,6 +231,67 @@
         wireframe.rotation.x = -Math.PI / 2;
         wireframe.position.y = 0.1;
         scene.add(wireframe);
+    }
+
+    function loadMapTileComposite() {
+        // Composite TMS tiles into a single texture
+        // Using zoom level 3 (8x8 tiles = 2048x2048px)
+        const zoom = 3;
+        const tilesX = 8;
+        const tilesY = 8;
+        const tileSize = 256;
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = tileSize * tilesX;
+        canvas.height = tileSize * tilesY;
+        const ctx = canvas.getContext('2d');
+        
+        // Fill with dark background initially
+        ctx.fillStyle = '#001020';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        let loadedTiles = 0;
+        const totalTiles = tilesX * tilesY;
+        
+        // Load tiles following TMS (OSGeo) standard
+        for (let x = 0; x < tilesX; x++) {
+            for (let y = 0; y < tilesY; y++) {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                
+                // TMS uses bottom-left origin
+                const tmsY = (tilesY - 1) - y;
+                img.src = `./assets/maps/strangereal/${zoom}/${x}/${tmsY}.png`;
+                
+                img.onload = function() {
+                    ctx.drawImage(img, x * tileSize, y * tileSize, tileSize, tileSize);
+                    loadedTiles++;
+                    
+                    if (loadedTiles === totalTiles) {
+                        // All tiles loaded - update the texture
+                        const texture = new THREE.CanvasTexture(canvas);
+                        texture.needsUpdate = true;
+                        if (mapMesh && mapMesh.material.uniforms) {
+                            mapMesh.material.uniforms.mapTexture.value = texture;
+                            mapMesh.material.needsUpdate = true;
+                        }
+                        console.log('Map tiles loaded successfully');
+                    }
+                };
+                
+                img.onerror = function() {
+                    console.warn(`Failed to load tile: ${zoom}/${x}/${tmsY}`);
+                    loadedTiles++;
+                    
+                    if (loadedTiles === totalTiles && mapMesh) {
+                        const texture = new THREE.CanvasTexture(canvas);
+                        texture.needsUpdate = true;
+                        mapMesh.material.uniforms.mapTexture.value = texture;
+                        mapMesh.material.needsUpdate = true;
+                    }
+                };
+            }
+        }
     }
 
     function loadLocations() {
