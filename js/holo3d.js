@@ -10,10 +10,24 @@
 
     const MAP_SIZE = 100;
 
-    init();
-    animate();
+    // Wait for page to load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            init();
+            animate();
+        });
+    } else {
+        init();
+        animate();
+    }
 
     function init() {
+        // Check if THREE is loaded
+        if (typeof THREE === 'undefined') {
+            console.error('THREE.js not loaded!');
+            document.getElementById('loading').innerHTML = 'ERROR: THREE.js failed to load';
+            return;
+        }
         // Scene setup
         scene = new THREE.Scene();
         scene.fog = new THREE.FogExp2(0x000000, 0.002);
@@ -35,6 +49,11 @@
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
         // Controls
+        if (typeof THREE.OrbitControls === 'undefined') {
+            console.error('OrbitControls not loaded!');
+            document.getElementById('loading').innerHTML = 'ERROR: OrbitControls failed to load';
+            return;
+        }
         controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
