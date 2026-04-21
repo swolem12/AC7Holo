@@ -368,6 +368,11 @@
                     image: iconFor(d),
                     color: color,
                     scale: d.kind === 'air' ? 0.55 : 0.5,
+                    // Grow when the camera is close, shrink when far away.
+                    scaleByDistance: new Cesium.NearFarScalar(
+                        5e4, 1.8,       // <= 50km cam dist: 1.8x
+                        5e6, 1.0        // >= 5000km cam dist: 1.0x
+                    ),
                     rotation: new Cesium.CallbackProperty(() => {
                         const h = e && e._data && e._data.heading;
                         return h != null ? Cesium.Math.toRadians(-h) : 0;
@@ -378,6 +383,25 @@
                     // terrain via the small buffer below.
                     disableDepthTestDistance: 1000,
                     heightReference: Cesium.HeightReference.NONE
+                },
+                // Callsign tag — only visible when the camera is close enough
+                // that the full string fits without cluttering the view.
+                label: {
+                    text: (d.callsign || d.id.split(':').pop() || '').toUpperCase(),
+                    font: 'bold 11px "Share Tech Mono", monospace',
+                    fillColor: color,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2.5,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    pixelOffset: new Cesium.Cartesian2(12, 0),
+                    horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+                    verticalOrigin: Cesium.VerticalOrigin.CENTER,
+                    showBackground: true,
+                    backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.7),
+                    backgroundPadding: new Cesium.Cartesian2(5, 3),
+                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3_000_000),
+                    scaleByDistance: new Cesium.NearFarScalar(5e4, 1.3, 3e6, 0.8),
+                    disableDepthTestDistance: 1000
                 },
                 // 5-minute glowing trail; the trail length is in seconds.
                 path: {
@@ -851,18 +875,24 @@
                     color: col.withAlpha(0.35),
                     outlineColor: col,
                     outlineWidth: 1.5,
+                    scaleByDistance: new Cesium.NearFarScalar(1e5, 1.6, 5e6, 1.0),
                     disableDepthTestDistance: 1000
                 },
                 label: {
                     text: b.name.toUpperCase(),
-                    font: '10px "Share Tech Mono", monospace',
+                    font: 'bold 12px "Share Tech Mono", monospace',
                     fillColor: col,
                     outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 2,
+                    outlineWidth: 2.5,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                     pixelOffset: new Cesium.Cartesian2(10, -6),
-                    showBackground: false,
-                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 6_000_000),
+                    showBackground: true,
+                    backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.55),
+                    backgroundPadding: new Cesium.Cartesian2(5, 3),
+                    // Labels at readable size when close (1.4x), still visible
+                    // at global view (0.8x) but not cluttering.
+                    scaleByDistance: new Cesium.NearFarScalar(1e5, 1.4, 1.5e7, 0.8),
+                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2.5e7),
                     disableDepthTestDistance: 1000
                 },
                 description: `${b.branch || ''} · ${b.country}`
@@ -926,19 +956,24 @@
                 // Screen-aligned — ignore aircraft-style heading rotation.
                 alignedAxis: Cesium.Cartesian3.ZERO,
                 rotation: 0,
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1.6, 5e6, 0.9),
                 disableDepthTestDistance: 1000,
                 heightReference: Cesium.HeightReference.NONE
             },
             label: {
-                text: ap.iata,
-                font: '10px "Share Tech Mono", monospace',
+                text: ap.iata + (ap.name ? '\n' + ap.name.toUpperCase() : ''),
+                font: 'bold 11px "Share Tech Mono", monospace',
                 fillColor: col,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 2,
+                outlineWidth: 2.5,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -20),
+                pixelOffset: new Cesium.Cartesian2(0, -22),
+                showBackground: true,
+                backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.6),
+                backgroundPadding: new Cesium.Cartesian2(5, 3),
                 disableDepthTestDistance: 1000,
-                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.0, 1e7, 0.6)
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1.5, 1.5e7, 0.7),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2.5e7)
             },
             _apInfo: { ap, kind }
         });
