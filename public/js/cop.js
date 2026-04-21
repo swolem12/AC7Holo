@@ -133,25 +133,6 @@
 
     // ---- Entity bookkeeping --------------------------------------------------
     const entities = new Map(); // id -> Cesium Entity
-    const routeCache = new Map();       // callsign -> route info | null
-    const pendingRoutes = new Set();    // callsigns awaiting lookup
-    // Common ICAO airline prefixes. Used to show the operator name in the
-    // selection panel even before adsb.lol resolves the full route.
-    const AIRLINE_NAMES = {
-        'AAL':'American Airlines','UAL':'United Airlines','DAL':'Delta Air Lines',
-        'SWA':'Southwest','JBU':'JetBlue','ASA':'Alaska','FFT':'Frontier','NKS':'Spirit',
-        'ACA':'Air Canada','WJA':'WestJet','BAW':'British Airways','VIR':'Virgin Atlantic',
-        'AFR':'Air France','KLM':'KLM','DLH':'Lufthansa','SWR':'Swiss','AUA':'Austrian',
-        'IBE':'Iberia','AZA':'ITA Airways','TAP':'TAP Portugal','SAS':'SAS',
-        'FIN':'Finnair','THY':'Turkish Airlines','UAE':'Emirates','QTR':'Qatar Airways',
-        'ETD':'Etihad','SVA':'Saudia','ELY':'El Al','MEA':'MEA',
-        'SIA':'Singapore Airlines','CPA':'Cathay Pacific','CCA':'Air China','CES':'China Eastern',
-        'CSN':'China Southern','ANA':'All Nippon','JAL':'Japan Airlines','KAL':'Korean Air',
-        'AAR':'Asiana','THA':'Thai Airways','QFA':'Qantas','VOZ':'Virgin Australia',
-        'ANZ':'Air New Zealand','AIC':'Air India','IGO':'IndiGo',
-        'RCH':'US Air Force (Reach)','SAM':'US Air Force (SAM)','NAVY':'US Navy',
-        'ARMY':'US Army','CNV':'US Navy','POLZON':'Police','LIFEGUARD':'Medevac'
-    };
     const AIR_COLOR_CIV = Cesium.Color.fromCssColorString('#3df0ff');
     const AIR_COLOR_MIL = Cesium.Color.fromCssColorString('#ff2d9c');
     const SEA_COLOR_CIV = Cesium.Color.fromCssColorString('#7affc8');
@@ -407,35 +388,17 @@
         $('sel_al').textContent = d.alt != null ? Math.round(d.alt) + ' m' : '---';
         $('sel_hd').textContent = d.heading != null ? Math.round(d.heading) + '°' : '---';
         $('sel_sp').textContent = d.speed != null ? Math.round(d.speed * 1.94384) + ' kt' : '---';
-        // Route info: resolve synchronously if cached, otherwise kick off a
-        // lookup so the panel populates as soon as adsb.lol answers.
+
+        // Flight-route enrichment (aircraft only). routeCache is populated
+        // asynchronously by routeTick(); if the record isn't ready yet,
+        // retry once after 4 seconds so the panel self-updates.
         const cs = (d.callsign || '').trim();
-        const airlineEl = $('sel_airline'), origEl = $('sel_orig'), destEl = $('sel_dest');
-        if (!cs || d.kind !== 'air') {
-            if (airlineEl) airlineEl.textContent = '---';
-            if (origEl) origEl.textContent = '---';
-            if (destEl) destEl.textContent = '---';
-            return;
-        }
-        const paintRoute = () => {
-            const r = routeCache.get(cs);
-            if (r) {
-                if (origEl) origEl.textContent = `${r.orig.iata || '?'} ${r.orig.name || ''}`.trim();
-                if (destEl) destEl.textContent = `${r.dest.iata || '?'} ${r.dest.name || ''}`.trim();
-            } else {
-                if (origEl) origEl.textContent = 'RESOLVING...';
-                if (destEl) destEl.textContent = 'RESOLVING...';
-            }
-            if (airlineEl) {
-                const airlineCode = cs.substring(0, 3);
-                airlineEl.textContent = AIRLINE_NAMES[airlineCode] || airlineCode || '---';
-            }
-        };
-        paintRoute();
-        if (!routeCache.has(cs)) {
-            pendingRoutes.add(cs);
-            // Re-paint after the batch lookup cycle.
-            setTimeout(() => { if (selected === entities.get(d.id)) paintRoute(); }, 3500);
+        const r  = cs && typeof routeCache !== 'undefined' ? routeCache.get(cs) : null;
+        $('sel_airline').textContent = (r && r.airline)  ? r.airline                                 : (d.kind === 'air' ? (cs ? '(looking up…)' : '---') : '---');
+        $('sel_orig').textContent    = (r && r.orig)     ? `${r.orig.iata || '?'} — ${r.orig.name || ''}` : '---';
+        $('sel_dest').textContent    = (r && r.dest)     ? `${r.dest.iata || '?'} — ${r.dest.name || ''}` : '---';
+        if (d.kind === 'air' && cs && !r && selected && selected._data && selected._data.id === d.id) {
+            setTimeout(() => { if (selected && selected._data && selected._data.id === d.id) showSelPanel(selected._data); }, 4000);
         }
     }
     function hideSelPanel() { $('bl').style.display = 'none'; }
@@ -596,14 +559,13 @@
         '273':'Russia','412':'China','431':'Japan','440':'South Korea','419':'India',
         '563':'Singapore','503':'Australia','636':'Liberia','371':'Panama'
     };
+    let aisMsgCount = 0;
     function startAisBrowser(apiKey) {
         try {
-            console.log('[AIS] connecting to aisstream.io...');
+            console.info('[AIS] connecting to aisstream.io…');
             const ws = new WebSocket('wss://stream.aisstream.io/v0/stream');
-            let msgs = 0;
             ws.onopen = () => {
-                console.log('[AIS] socket open; subscribing globally');
-                $('status').textContent = 'AIS+DIRECT';
+                console.info('[AIS] WS open — subscribing to global bounding box');
                 ws.send(JSON.stringify({
                     APIKey: apiKey,
                     BoundingBoxes: [[[-90, -180], [90, 180]]],
@@ -611,11 +573,11 @@
                 }));
             };
             ws.onmessage = ev => {
-                msgs++;
-                if (msgs === 1) console.log('[AIS] first message received, stream live');
                 try {
                     const m = JSON.parse(ev.data);
-                    if (m.error) { console.warn('[AIS] server error:', m.error); return; }
+                    if (m.error || m.Error) { console.warn('[AIS] error msg:', m.error || m.Error); return; }
+                    aisMsgCount++;
+                    if (aisMsgCount === 1) console.info('[AIS] first message received');
                     const meta = m.MetaData || {};
                     const mmsi = meta.MMSI || meta.MMSI_String;
                     if (!mmsi) return;
@@ -635,9 +597,9 @@
                     }]});
                 } catch {}
             };
-            ws.onerror = (e) => console.warn('[AIS] socket error', e);
+            ws.onerror = err => console.warn('[AIS] WS error', err);
             ws.onclose = ev => {
-                console.warn('[AIS] socket closed (code', ev.code, ') reconnecting in 5s');
+                console.warn(`[AIS] WS closed code=${ev.code} reason=${ev.reason || '(none)'} — reconnecting in 5s`);
                 setTimeout(() => startAisBrowser(apiKey), 5000);
             };
         } catch (e) { console.warn('AISStream start failed:', e.message); }
@@ -714,11 +676,8 @@
             pollTimer = setInterval(pollTick, 10_000);
         }
         // If we're on a static site (no backend) and a key is provided, open AIS WS.
-        const hasBackend = await HAS_BACKEND_P;
-        if (!hasBackend && window.AISSTREAM_KEY) {
+        if (!(await HAS_BACKEND_P) && window.AISSTREAM_KEY) {
             startAisBrowser(window.AISSTREAM_KEY);
-        } else if (!hasBackend) {
-            console.warn('[AIS] no window.AISSTREAM_KEY set — vessels will not appear on static deployment');
         }
     })();
 
@@ -807,8 +766,31 @@
     viewer.dataSources.add(routeLines);
     viewer.dataSources.add(airportPins);
 
+    // Top ICAO airline designators so we can show a readable airline name in
+    // the selection panel. Missing codes fall back to the raw 3-letter code.
+    const AIRLINES = {
+        UAL:'United Airlines', AAL:'American Airlines', DAL:'Delta Air Lines',
+        SWA:'Southwest Airlines', JBU:'JetBlue', ASA:'Alaska Airlines',
+        FFT:'Frontier', NKS:'Spirit', HAL:'Hawaiian', SKW:'SkyWest',
+        ACA:'Air Canada', WJA:'WestJet', TSC:'Air Transat',
+        BAW:'British Airways', VIR:'Virgin Atlantic', EZY:'easyJet', RYR:'Ryanair',
+        DLH:'Lufthansa', AFR:'Air France', KLM:'KLM', SAS:'Scandinavian',
+        IBE:'Iberia', SWR:'Swiss', AUA:'Austrian', TAP:'TAP Portugal',
+        FIN:'Finnair', AZA:'ITA Airways', THY:'Turkish Airlines',
+        UAE:'Emirates', QTR:'Qatar Airways', ETD:'Etihad', SVA:'Saudia',
+        SIA:'Singapore Airlines', CPA:'Cathay Pacific', ANA:'All Nippon Airways',
+        JAL:'Japan Airlines', KAL:'Korean Air', AAR:'Asiana',
+        CCA:'Air China', CES:'China Eastern', CSN:'China Southern',
+        AIC:'Air India', AXB:'Air India Express', IGO:'IndiGo',
+        QFA:'Qantas', VOZ:'Virgin Australia', ANZ:'Air New Zealand',
+        FDX:'FedEx', UPS:'UPS', DHL:'DHL', GTI:'Atlas Air',
+        RCH:'USAF Air Mobility', KNF:'USN', CNV:'USN', LOG:'US Coast Guard'
+    };
+
+    const routeCache = new Map();       // callsign -> { airline, flight, orig, dest } | null (miss)
     const routeEntityByCs = new Map();  // callsign -> Cesium polyline entity
     const airportSeen = new Set();      // iata we've already dropped a pin for
+    const pendingRoutes = new Set();    // callsigns awaiting lookup
     let routesVisible = true;
 
     function addAirportPin(ap, kind) {
@@ -891,6 +873,8 @@
                 const orig = aps[0], dest = aps[aps.length - 1];
                 if (orig.lat == null || dest.lat == null) { routeCache.set(cs, null); continue; }
                 routeCache.set(cs, {
+                    airline: AIRLINES[row.airline_code] || row.airline_code || null,
+                    flight:  row.number || null,
                     orig: { lat: orig.lat, lon: orig.lon, iata: orig.iata, name: orig.name },
                     dest: { lat: dest.lat, lon: dest.lon, iata: dest.iata, name: dest.name }
                 });
@@ -980,7 +964,7 @@
             } else if (act === 'designate') {
                 if (selected.billboard) {
                     selected.billboard.color = Cesium.Color.RED;
-                    selected.billboard.scale = 1.0;
+                    selected.billboard.scale = selected._kind === 'air' ? 0.9 : 0.8;
                 }
             }
             radial.classList.remove('show');
