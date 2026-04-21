@@ -3,20 +3,56 @@
 (function () {
     'use strict';
 
+    // Surface any fatal error directly into the boot overlay so the page never
+    // just sits there silently.
+    window.addEventListener('error', ev => {
+        const log = document.getElementById('bootlog');
+        if (log) {
+            const d = document.createElement('div');
+            d.style.color = '#ff3a3a';
+            d.textContent = '> FATAL: ' + (ev.message || ev.error);
+            log.appendChild(d);
+        }
+    });
+
+    if (typeof Cesium === 'undefined') {
+        const log = document.getElementById('bootlog');
+        log.innerHTML = '<div style="color:#ff3a3a">> FATAL: Cesium failed to load from CDN.</div>' +
+                        '<div style="color:#ffb300">> Check network / ad-blocker / CSP for cdn.jsdelivr.net.</div>';
+        return;
+    }
+
     // Cesium ion token is optional; without it we use OSM imagery only.
-    // Set window.CESIUM_ION_TOKEN before this script to enable terrain.
     if (window.CESIUM_ION_TOKEN) Cesium.Ion.defaultAccessToken = window.CESIUM_ION_TOKEN;
 
-    const viewer = new Cesium.Viewer('cesium', {
+    // Cesium 1.104+ replaced { imageryProvider } with { baseLayer }. Support both.
+    const osmProvider = new Cesium.UrlTemplateImageryProvider({
+        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        credit: '© OpenStreetMap',
+        maximumLevel: 19
+    });
+    const viewerOpts = {
         animation: false, timeline: false, baseLayerPicker: false, geocoder: false,
         homeButton: false, sceneModePicker: false, navigationHelpButton: false,
-        fullscreenButton: false, infoBox: false, selectionIndicator: false,
-        imageryProvider: new Cesium.UrlTemplateImageryProvider({
-            url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            credit: '© OpenStreetMap',
-            maximumLevel: 19
-        })
-    });
+        fullscreenButton: false, infoBox: false, selectionIndicator: false
+    };
+    if (typeof Cesium.ImageryLayer !== 'undefined' && Cesium.ImageryLayer.fromProviderAsync) {
+        // New API (1.104+)
+        viewerOpts.baseLayer = new Cesium.ImageryLayer(osmProvider);
+    } else {
+        // Legacy API
+        viewerOpts.imageryProvider = osmProvider;
+    }
+
+    let viewer;
+    try {
+        viewer = new Cesium.Viewer('cesium', viewerOpts);
+    } catch (e) {
+        const log = document.getElementById('bootlog');
+        log.innerHTML = '<div style="color:#ff3a3a">> FATAL: Cesium viewer init failed.</div>' +
+                        '<div style="color:#ffb300">> ' + e.message + '</div>';
+        return;
+    }
 
     // Holographic tint: dim the globe and tint toward cyan via atmosphere.
     const scene = viewer.scene;
@@ -301,6 +337,19 @@
     hideSelPanel();
 
     // ---- Feed: prefer SSE stream, fall back to polling ----------------------
+    // On GitHub Pages (static hosting) the backend proxies don't exist, so we
+    // probe /api/tracking/aircraft once; on failure we call OpenSky directly
+    // from the browser. OpenSky's anonymous /states/all endpoint returns CORS
+    // headers that allow this. AISStream requires a server-side WebSocket key
+    // so vessels only appear when the Node backend is reachable OR when the
+    // user sets window.AISSTREAM_KEY (advanced, exposes the key).
+    const HAS_BACKEND_P = (async () => {
+        try {
+            const r = await fetch('/api/tracking/aircraft', { method: 'HEAD' });
+            return r.ok;
+        } catch { return false; }
+    })();
+
     async function poll(url, onData) {
         try {
             const r = await fetch(url);
@@ -319,19 +368,126 @@
         for (const d of json.entities) upsertEntity(d);
     }
 
+    // ---- Direct OpenSky fetch (browser) -------------------------------------
+    // Same ICAO24-prefix -> country table and normalization the backend uses.
+    const ICAO24_PREFIXES = [
+        ['a', 'United States'], ['c0', 'Canada'], ['c8', 'Australia'], ['7c', 'Australia'],
+        ['40', 'United Kingdom'], ['43', 'United Kingdom'],
+        ['3c', 'Germany'], ['39', 'France'], ['38', 'France'],
+        ['30', 'Italy'], ['31', 'Italy'], ['34', 'Spain'], ['35', 'Spain'],
+        ['36', 'Netherlands'], ['44', 'Belgium'], ['45', 'Denmark'],
+        ['46', 'Finland'], ['47', 'Greece'], ['4b', 'Switzerland'],
+        ['10', 'Russia'], ['14', 'Russia'], ['78', 'China'],
+        ['71', 'South Korea'], ['86', 'Japan'], ['80', 'India']
+    ];
+    function icaoCountry(icao24) {
+        if (!icao24) return null;
+        const a = icao24.toLowerCase();
+        let best = null;
+        for (const [pfx, name] of ICAO24_PREFIXES) {
+            if (a.startsWith(pfx) && (!best || pfx.length > best[0].length)) best = [pfx, name];
+        }
+        return best ? best[1] : null;
+    }
+
+    async function fetchOpenSkyDirect() {
+        try {
+            const r = await fetch('https://opensky-network.org/api/states/all');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const raw = await r.json();
+            const entities = [];
+            for (const s of (raw.states || [])) {
+                const [icao24, callsign, origin_country, , , lon, lat, baro_alt,
+                       on_ground, velocity, true_track, , , geo_alt] = s;
+                if (lat == null || lon == null) continue;
+                entities.push({
+                    id: 'a:' + icao24,
+                    kind: 'air',
+                    callsign: (callsign || '').trim() || null,
+                    country: origin_country || icaoCountry(icao24),
+                    iso2: null,
+                    lat, lon,
+                    alt: geo_alt != null ? geo_alt : baro_alt,
+                    heading: true_track,
+                    speed: velocity,
+                    type: on_ground ? 'ground' : 'airborne',
+                    updated: raw.time
+                });
+            }
+            ingest({ entities });
+            $('status').textContent = 'DIRECT';
+        } catch (e) {
+            console.warn('OpenSky direct failed:', e.message);
+            $('status').textContent = 'DEGRADED';
+        }
+    }
+
+    // ---- Direct AISStream (browser WS, optional) ----------------------------
+    // Only activates if window.AISSTREAM_KEY is set. Exposing a key client-side
+    // is only appropriate for free/throttled keys you're comfortable burning.
+    const MID_BROWSER = {
+        '366':'United States','367':'United States','368':'United States','369':'United States',
+        '232':'United Kingdom','233':'United Kingdom','234':'United Kingdom','235':'United Kingdom',
+        '211':'Germany','227':'France','247':'Italy','224':'Spain','244':'Netherlands',
+        '273':'Russia','412':'China','431':'Japan','440':'South Korea','419':'India',
+        '563':'Singapore','503':'Australia','636':'Liberia','371':'Panama'
+    };
+    function startAisBrowser(apiKey) {
+        try {
+            const ws = new WebSocket('wss://stream.aisstream.io/v0/stream');
+            ws.onopen = () => {
+                ws.send(JSON.stringify({
+                    APIKey: apiKey,
+                    BoundingBoxes: [[[-90, -180], [90, 180]]],
+                    FilterMessageTypes: ['PositionReport', 'ShipStaticData']
+                }));
+            };
+            ws.onmessage = ev => {
+                try {
+                    const m = JSON.parse(ev.data);
+                    const meta = m.MetaData || {};
+                    const mmsi = meta.MMSI || meta.MMSI_String;
+                    if (!mmsi) return;
+                    const pos = (m.Message && (m.Message.PositionReport || {})) || {};
+                    const stat = (m.Message && (m.Message.ShipStaticData || {})) || {};
+                    if (pos.Latitude == null || pos.Longitude == null) return;
+                    ingest({ entities: [{
+                        id: 's:' + mmsi, kind: 'sea',
+                        callsign: (stat.CallSign || meta.ShipName || '').trim() || null,
+                        country: MID_BROWSER[String(mmsi).substring(0, 3)] || null,
+                        iso2: null,
+                        lat: pos.Latitude, lon: pos.Longitude, alt: 0,
+                        heading: pos.TrueHeading != null && pos.TrueHeading < 360 ? pos.TrueHeading : (pos.Cog ?? null),
+                        speed: pos.Sog != null ? pos.Sog * 0.5144 : null,
+                        type: stat.Type ? String(stat.Type) : 'vessel',
+                        updated: Math.floor(Date.now() / 1000)
+                    }]});
+                } catch {}
+            };
+            ws.onerror = () => console.warn('AISStream WS error');
+            ws.onclose = () => setTimeout(() => startAisBrowser(apiKey), 5000);
+        } catch (e) { console.warn('AISStream start failed:', e.message); }
+    }
+
     async function pollTick() {
-        await Promise.all([
-            poll('/api/tracking/aircraft', ingest),
-            poll('/api/tracking/vessels', ingest)
-        ]);
+        const hasBackend = await HAS_BACKEND_P;
+        if (hasBackend) {
+            await Promise.all([
+                poll('/api/tracking/aircraft', ingest),
+                poll('/api/tracking/vessels', ingest)
+            ]);
+        } else {
+            await fetchOpenSkyDirect();
+        }
         gcStale();
         updateHud();
     }
 
     let feedMode = 'polling';
     let pollTimer = null;
-    function startSse() {
+    async function startSse() {
         if (typeof EventSource === 'undefined') return false;
+        if (!(await HAS_BACKEND_P)) return false;
         try {
             const es = new EventSource('/api/tracking/stream');
             es.addEventListener('snapshot', ev => {
@@ -344,7 +500,6 @@
             es.onerror = () => {
                 if (feedMode !== 'sse') {
                     es.close();
-                    console.warn('SSE failed, falling back to polling');
                     if (!pollTimer) pollTimer = setInterval(pollTick, 10_000);
                 }
             };
@@ -379,9 +534,16 @@
 
     runBoot();
     pollTick(); // first frame immediately
-    if (!startSse()) {
-        pollTimer = setInterval(pollTick, 10_000);
-    }
+    (async () => {
+        const sseOk = await startSse();
+        if (!sseOk && !pollTimer) {
+            pollTimer = setInterval(pollTick, 10_000);
+        }
+        // If we're on a static site (no backend) and a key is provided, open AIS WS.
+        if (!(await HAS_BACKEND_P) && window.AISSTREAM_KEY) {
+            startAisBrowser(window.AISSTREAM_KEY);
+        }
+    })();
 
     // ---- Keyboard bindings ---------------------------------------------------
     window.addEventListener('keydown', ev => {
@@ -412,10 +574,23 @@
     const baseCollection = new Cesium.CustomDataSource('bases');
     viewer.dataSources.add(baseCollection);
 
-    fetch('/api/reference/bases').then(r => r.json()).then(j => {
+    async function loadBases() {
+        // Try backend proxy first, fall back to the static JSON bundled with the site.
+        try {
+            const r = await fetch('/api/reference/bases');
+            if (r.ok) return (await r.json()).bases || [];
+        } catch {}
+        try {
+            const r = await fetch('./datasets/bases-static.json');
+            if (r.ok) return (await r.json()).bases || [];
+        } catch {}
+        return [];
+    }
+
+    loadBases().then(bases => {
         const airColor = Cesium.Color.fromCssColorString('#3df0ff').withAlpha(0.85);
         const navColor = Cesium.Color.fromCssColorString('#ff2d9c').withAlpha(0.85);
-        for (const b of (j.bases || [])) {
+        for (const b of bases) {
             const col = b.type === 'naval' ? navColor : airColor;
             baseCollection.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(b.lon, b.lat, 0),
@@ -499,7 +674,7 @@
             const u = b.dataset.u;
             if (u === 'strangereal') {
                 // Hand off to the existing Strangereal atlas (Leaflet page).
-                window.location.href = '/index.html';
+                window.location.href = './index.html';
             } else {
                 document.querySelectorAll('#universe .ubtn').forEach(x => x.classList.remove('active'));
                 b.classList.add('active');

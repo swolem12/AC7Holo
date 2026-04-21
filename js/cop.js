@@ -3,20 +3,56 @@
 (function () {
     'use strict';
 
+    // Surface any fatal error directly into the boot overlay so the page never
+    // just sits there silently.
+    window.addEventListener('error', ev => {
+        const log = document.getElementById('bootlog');
+        if (log) {
+            const d = document.createElement('div');
+            d.style.color = '#ff3a3a';
+            d.textContent = '> FATAL: ' + (ev.message || ev.error);
+            log.appendChild(d);
+        }
+    });
+
+    if (typeof Cesium === 'undefined') {
+        const log = document.getElementById('bootlog');
+        log.innerHTML = '<div style="color:#ff3a3a">> FATAL: Cesium failed to load from CDN.</div>' +
+                        '<div style="color:#ffb300">> Check network / ad-blocker / CSP for cdn.jsdelivr.net.</div>';
+        return;
+    }
+
     // Cesium ion token is optional; without it we use OSM imagery only.
-    // Set window.CESIUM_ION_TOKEN before this script to enable terrain.
     if (window.CESIUM_ION_TOKEN) Cesium.Ion.defaultAccessToken = window.CESIUM_ION_TOKEN;
 
-    const viewer = new Cesium.Viewer('cesium', {
+    // Cesium 1.104+ replaced { imageryProvider } with { baseLayer }. Support both.
+    const osmProvider = new Cesium.UrlTemplateImageryProvider({
+        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        credit: '© OpenStreetMap',
+        maximumLevel: 19
+    });
+    const viewerOpts = {
         animation: false, timeline: false, baseLayerPicker: false, geocoder: false,
         homeButton: false, sceneModePicker: false, navigationHelpButton: false,
-        fullscreenButton: false, infoBox: false, selectionIndicator: false,
-        imageryProvider: new Cesium.UrlTemplateImageryProvider({
-            url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            credit: '© OpenStreetMap',
-            maximumLevel: 19
-        })
-    });
+        fullscreenButton: false, infoBox: false, selectionIndicator: false
+    };
+    if (typeof Cesium.ImageryLayer !== 'undefined' && Cesium.ImageryLayer.fromProviderAsync) {
+        // New API (1.104+)
+        viewerOpts.baseLayer = new Cesium.ImageryLayer(osmProvider);
+    } else {
+        // Legacy API
+        viewerOpts.imageryProvider = osmProvider;
+    }
+
+    let viewer;
+    try {
+        viewer = new Cesium.Viewer('cesium', viewerOpts);
+    } catch (e) {
+        const log = document.getElementById('bootlog');
+        log.innerHTML = '<div style="color:#ff3a3a">> FATAL: Cesium viewer init failed.</div>' +
+                        '<div style="color:#ffb300">> ' + e.message + '</div>';
+        return;
+    }
 
     // Holographic tint: dim the globe and tint toward cyan via atmosphere.
     const scene = viewer.scene;

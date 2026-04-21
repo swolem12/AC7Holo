@@ -188,8 +188,15 @@
   <span class="k" style="margin-left:16px">[1]AIR [2]NAVAL [3]ALL [F]FOLLOW</span>
 </div>
 
+<script>
+  // Static-hosting credentials. These live in page source — acceptable only
+  // for demo/test deployments. ROTATE these tokens at your provider dashboards
+  // before moving to production and keep secrets on the server instead.
+  window.CESIUM_ION_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI4NDE3YTM4OC1hNjliLTQxMDktYWU1Yy03NThmMDRmYjg3ZTQiLCJpZCI6NDIxMDY2LCJpYXQiOjE3NzY3NDYyMzZ9.WmBer8k8G64XSivcBJgGbzKcKSSoepnLM4kB1-tp8so';
+  window.AISSTREAM_KEY    = 'a65e1e73cf6990a652161ed9bcfc7c3fe68017c4';
+  window.CESIUM_BASE_URL  = 'https://cdn.jsdelivr.net/npm/cesium@1.117/Build/Cesium/';
+</script>
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.117/Build/Cesium/Cesium.js"></script>
-<script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.117/Build/Cesium/';</script>
 <script src="./js/cop.js"></script>
 </body>
 </html>
