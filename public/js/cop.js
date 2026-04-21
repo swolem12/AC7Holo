@@ -371,7 +371,11 @@
 
     function ingest(json) {
         if (!json || !json.entities) return;
-        for (const d of json.entities) upsertEntity(d);
+        for (const d of json.entities) {
+            upsertEntity(d);
+            // Queue route lookup for any new aircraft callsign.
+            if (typeof queueRoute === 'function') queueRoute(d);
+        }
     }
 
     // ---- Direct OpenSky fetch (browser) -------------------------------------
@@ -679,6 +683,144 @@
         }
     }).catch(e => console.warn('bases fetch failed:', e.message));
 
+    // ---- Flight routes (origin -> destination) ------------------------------
+    // adsb.lol's /api/0/routeset resolves a callsign to its scheduled origin
+    // and destination airports (with lat/lon). We batch-query for every new
+    // callsign we see, cache the answer, then draw a geodesic arc from the
+    // departure airport through the current aircraft position to the arrival
+    // airport. This is how flight-tracker style visualisations work — the
+    // great-circle path and airport pins make the globe feel alive.
+    const routeLines = new Cesium.CustomDataSource('routes');
+    const airportPins = new Cesium.CustomDataSource('airports');
+    viewer.dataSources.add(routeLines);
+    viewer.dataSources.add(airportPins);
+
+    const routeCache = new Map();       // callsign -> { orig:{lat,lon,iata,name}, dest:{...} } | null (miss)
+    const routeEntityByCs = new Map();  // callsign -> Cesium polyline entity
+    const airportSeen = new Set();      // iata we've already dropped a pin for
+    const pendingRoutes = new Set();    // callsigns awaiting lookup
+    let routesVisible = true;
+
+    function addAirportPin(ap, kind) {
+        if (!ap || ap.lat == null || ap.lon == null || !ap.iata) return;
+        const key = ap.iata + ':' + kind;
+        if (airportSeen.has(key)) return;
+        airportSeen.add(key);
+        const col = kind === 'orig'
+            ? Cesium.Color.fromCssColorString('#3dff9c')  // green = departure
+            : Cesium.Color.fromCssColorString('#ffb347'); // amber = arrival
+        airportPins.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(ap.lon, ap.lat, 0),
+            point: {
+                pixelSize: 5,
+                color: col.withAlpha(0.9),
+                outlineColor: col,
+                outlineWidth: 1,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            },
+            label: {
+                text: ap.iata,
+                font: '10px "Share Tech Mono", monospace',
+                fillColor: col,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, -14),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                scaleByDistance: new Cesium.NearFarScalar(5e5, 1.0, 1e7, 0.6)
+            }
+        });
+    }
+
+    function drawRouteFor(callsign, entity) {
+        const r = routeCache.get(callsign);
+        if (!r || !entity) return;
+        // Don't add twice.
+        if (routeEntityByCs.has(callsign)) return;
+        const col = colorFor(entity._data).withAlpha(0.55);
+        // Build the polyline positions dynamically: orig -> live plane -> dest.
+        // Using a CallbackProperty keeps the middle vertex pinned to the
+        // aircraft as it moves, so you see the flown vs remaining segments.
+        const origPos = Cesium.Cartesian3.fromDegrees(r.orig.lon, r.orig.lat, 0);
+        const destPos = Cesium.Cartesian3.fromDegrees(r.dest.lon, r.dest.lat, 0);
+        const line = routeLines.entities.add({
+            polyline: {
+                positions: new Cesium.CallbackProperty(() => {
+                    const mid = entity._sampled.getValue(viewer.clock.currentTime);
+                    return mid ? [origPos, mid, destPos] : [origPos, destPos];
+                }, false),
+                width: 1.2,
+                arcType: Cesium.ArcType.GEODESIC,
+                material: new Cesium.PolylineDashMaterialProperty({
+                    color: col,
+                    dashLength: 16
+                })
+            }
+        });
+        routeEntityByCs.set(callsign, line);
+        addAirportPin(r.orig, 'orig');
+        addAirportPin(r.dest, 'dest');
+    }
+
+    async function resolveRouteBatch(batch) {
+        // batch: [{callsign, lat, lng}]
+        try {
+            const r = await fetch('https://api.adsb.lol/api/0/routeset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ planes: batch })
+            });
+            if (!r.ok) return;
+            const arr = await r.json();
+            for (let i = 0; i < arr.length; i++) {
+                const row = arr[i];
+                const cs = (batch[i].callsign || '').trim();
+                if (!cs) continue;
+                const aps = row && row._airports;
+                if (!aps || aps.length < 2) { routeCache.set(cs, null); continue; }
+                const orig = aps[0], dest = aps[aps.length - 1];
+                if (orig.lat == null || dest.lat == null) { routeCache.set(cs, null); continue; }
+                routeCache.set(cs, {
+                    orig: { lat: orig.lat, lon: orig.lon, iata: orig.iata, name: orig.name },
+                    dest: { lat: dest.lat, lon: dest.lon, iata: dest.iata, name: dest.name }
+                });
+            }
+            // After the cache is warm, render routes for any matching entities.
+            for (const e of entities.values()) {
+                const cs = e._data && e._data.callsign && e._data.callsign.trim();
+                if (cs && routeCache.get(cs)) drawRouteFor(cs, e);
+            }
+        } catch (e) { console.warn('routeset failed:', e.message); }
+    }
+
+    async function routeTick() {
+        if (pendingRoutes.size === 0) return;
+        const batch = [];
+        for (const cs of pendingRoutes) {
+            const e = [...entities.values()].find(x => x._data && (x._data.callsign || '').trim() === cs);
+            if (!e) continue;
+            batch.push({ callsign: cs, lat: e._data.lat, lng: e._data.lon });
+            if (batch.length >= 100) break;
+        }
+        for (const p of batch) pendingRoutes.delete(p.callsign);
+        if (batch.length) await resolveRouteBatch(batch);
+    }
+
+    // Queue route lookups for new aircraft callsigns. Called from ingest().
+    function queueRoute(d) {
+        if (!routesVisible) return;
+        if (d.kind !== 'air') return;
+        const cs = (d.callsign || '').trim();
+        if (!cs) return;
+        if (routeCache.has(cs)) {
+            const ent = entities.get(d.id);
+            if (ent && routeCache.get(cs)) drawRouteFor(cs, ent);
+            return;
+        }
+        pendingRoutes.add(cs);
+    }
+    setInterval(routeTick, 3000);
+
     // ---- Layer toggles -------------------------------------------------------
     document.querySelectorAll('#layers .btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -687,6 +829,11 @@
             if (btn.dataset.layer === 'bases') baseCollection.show = on;
             if (btn.dataset.layer === 'trails') {
                 for (const e of entities.values()) e.path.show = on;
+            }
+            if (btn.dataset.layer === 'routes') {
+                routesVisible = on;
+                routeLines.show = on;
+                airportPins.show = on;
             }
         });
     });
