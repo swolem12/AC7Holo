@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>COP // GLOBAL TACTICAL DISPLAY</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<link rel="icon" href="favicon.ico" />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+<link href="https://cdn.jsdelivr.net/npm/cesium@1.117/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+<style>
+  :root {
+    --cy: #3df0ff;
+    --cy-dim: #0a8ea3;
+    --mg: #ff2d9c;
+    --amber: #ffb300;
+    --red: #ff3a3a;
+    --bg: #02060b;
+  }
+  html, body { margin:0; padding:0; height:100%; background:var(--bg); color:var(--cy);
+    font-family:'Share Tech Mono','Orbitron',monospace; overflow:hidden; }
+  #cesium { position:absolute; inset:0; }
+  /* AC7 vignette + scanlines */
+  #cesium::after {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      repeating-linear-gradient(0deg, rgba(61,240,255,.04) 0 2px, transparent 2px 4px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.75) 100%);
+    mix-blend-mode:screen;
+  }
+
+  .panel {
+    position:absolute; background:rgba(2,18,28,.72); border:1px solid var(--cy);
+    box-shadow: 0 0 12px rgba(61,240,255,.35), inset 0 0 12px rgba(61,240,255,.15);
+    padding:10px 12px; font-size:12px; letter-spacing:.08em;
+    backdrop-filter: blur(2px);
+    text-shadow:0 0 4px rgba(61,240,255,.6);
+  }
+  .panel h3 {
+    margin:0 0 6px; font-family:'Orbitron',sans-serif; font-weight:700;
+    font-size:11px; color:var(--cy); border-bottom:1px solid var(--cy-dim); padding-bottom:4px;
+    letter-spacing:.22em;
+  }
+  .panel .k { color:var(--cy-dim); }
+  .panel .v { color:#e6faff; }
+  .panel.mg { border-color:var(--mg); color:var(--mg); box-shadow:0 0 12px rgba(255,45,156,.35), inset 0 0 12px rgba(255,45,156,.15); }
+  .panel.mg h3 { color:var(--mg); border-bottom-color:#a0216b; }
+
+  #tl { top:14px; left:14px; min-width:220px; }
+  #tr { top:14px; right:14px; min-width:240px; text-align:right; }
+  #bl { bottom:14px; left:14px; min-width:260px; }
+  #br { bottom:14px; right:14px; min-width:220px; }
+  #legend { bottom:14px; left:50%; transform:translateX(-50%); display:flex; gap:18px; align-items:center; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px;
+    box-shadow:0 0 8px currentColor; vertical-align:middle; }
+
+  /* corner brackets */
+  .brk { position:absolute; width:18px; height:18px; border:2px solid var(--cy); }
+  .brk.tl { top:6px; left:6px; border-right:0; border-bottom:0; }
+  .brk.tr { top:6px; right:6px; border-left:0; border-bottom:0; }
+  .brk.bl { bottom:6px; left:6px; border-right:0; border-top:0; }
+  .brk.br { bottom:6px; right:6px; border-left:0; border-top:0; }
+
+  #selpanel { display:none; width:300px; }
+  #selpanel .title { color:var(--mg); font-family:'Orbitron',sans-serif; font-weight:900;
+    letter-spacing:.2em; text-shadow:0 0 6px var(--mg); margin-bottom:6px; }
+  .row { display:flex; justify-content:space-between; gap:10px; }
+
+  /* boot overlay */
+  #boot { position:absolute; inset:0; background:var(--bg); z-index:20;
+    color:var(--cy); font-family:'Share Tech Mono',monospace;
+    text-shadow:0 0 10px var(--cy); padding:8% 12%; box-sizing:border-box;
+    font-size:14px; line-height:1.9; }
+  #boot.hide { opacity:0; pointer-events:none; transition:opacity .8s; }
+  #boot .big { font-family:'Orbitron',sans-serif; font-size:28px; font-weight:900;
+    letter-spacing:.5em; margin-bottom:20px; color:var(--cy); }
+  #boot .ok { color:#7affc8; }
+  #boot .warn { color:var(--amber); }
+  #boot .caret::after { content:"_"; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  /* filter buttons */
+  #filters { position:absolute; top:14px; left:50%; transform:translateX(-50%);
+    display:flex; gap:6px; }
+  .btn { background:rgba(2,18,28,.72); border:1px solid var(--cy); color:var(--cy);
+    padding:6px 12px; font-family:'Orbitron',sans-serif; font-size:11px; letter-spacing:.2em;
+    cursor:pointer; text-shadow:0 0 4px var(--cy); }
+  .btn.active { background:var(--cy); color:#02060b; text-shadow:none; box-shadow:0 0 10px var(--cy); }
+  .btn.mg { border-color:var(--mg); color:var(--mg); text-shadow:0 0 4px var(--mg); }
+  .btn.mg.active { background:var(--mg); color:#02060b; box-shadow:0 0 10px var(--mg); }
+
+  /* radial context menu */
+  #radial { position:absolute; width:260px; height:260px; margin-left:-130px; margin-top:-130px;
+    pointer-events:none; z-index:30; display:none; }
+  #radial.show { display:block; }
+  #radial .slice {
+    position:absolute; left:50%; top:50%; width:110px; transform-origin:left center;
+    pointer-events:auto;
+    background:linear-gradient(90deg, rgba(61,240,255,0.05), rgba(61,240,255,0.35));
+    border:1px solid var(--cy); color:var(--cy);
+    padding:6px 10px; font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:.2em;
+    cursor:pointer; text-shadow:0 0 4px var(--cy);
+    clip-path: polygon(0 40%, 100% 0, 100% 100%, 0 60%);
+  }
+  #radial .slice:hover { background:var(--cy); color:#02060b; text-shadow:none; }
+
+  /* universe toggle */
+  #universe { position:absolute; top:54px; left:50%; transform:translateX(-50%);
+    display:flex; gap:4px; font-size:10px; }
+  .ubtn { background:rgba(2,18,28,.72); border:1px solid var(--cy-dim); color:var(--cy-dim);
+    padding:3px 10px; font-family:'Orbitron',sans-serif; letter-spacing:.3em; cursor:pointer; }
+  .ubtn.active { color:#e6faff; border-color:var(--cy); text-shadow:0 0 6px var(--cy); }
+
+  /* layer toggles */
+  #layers { position:absolute; top:14px; right:270px; display:flex; gap:4px; }
+</style>
+</head>
+<body>
+<div id="cesium"></div>
+<span class="brk tl"></span><span class="brk tr"></span>
+<span class="brk bl"></span><span class="brk br"></span>
+
+<div id="boot">
+  <div class="big">STRANGEREAL // COP</div>
+  <div id="bootlog"></div>
+</div>
+
+<div id="filters">
+  <button class="btn active" data-f="all">ALL</button>
+  <button class="btn" data-f="air">AIR</button>
+  <button class="btn mg" data-f="sea">NAVAL</button>
+</div>
+
+<div id="universe">
+  <button class="ubtn active" data-u="earth">EARTH</button>
+  <button class="ubtn" data-u="strangereal">STRANGEREAL</button>
+</div>
+
+<div id="layers">
+  <button class="btn active" data-layer="bases">[B] BASES</button>
+  <button class="btn active" data-layer="trails">[T] TRAILS</button>
+</div>
+
+<div id="radial">
+  <div class="slice" style="transform:translate(0,-50%) rotate(-60deg)" data-act="track">TRACK</div>
+  <div class="slice" style="transform:translate(0,-50%) rotate(-20deg)" data-act="intel">INTEL</div>
+  <div class="slice" style="transform:translate(0,-50%) rotate(20deg)"  data-act="designate">DESIGNATE</div>
+  <div class="slice" style="transform:translate(0,-50%) rotate(60deg)"  data-act="vector">VECTOR</div>
+</div>
+
+<div id="tl" class="panel">
+  <h3>[ENTITIES]</h3>
+  <div class="row"><span class="k">AIR</span><span class="v" id="cAir">0</span></div>
+  <div class="row"><span class="k">NAVAL</span><span class="v" id="cSea">0</span></div>
+  <div class="row"><span class="k">TOTAL</span><span class="v" id="cTot">0</span></div>
+</div>
+
+<div id="tr" class="panel mg">
+  <h3>[DATALINK]</h3>
+  <div class="row"><span class="k">STATUS</span><span class="v" id="status">OFFLINE</span></div>
+  <div class="row"><span class="k">UTC</span><span class="v" id="utc">--:--:--</span></div>
+  <div class="row"><span class="k">NODE</span><span class="v">COP-01</span></div>
+</div>
+
+<div id="bl" class="panel" id="selpanel">
+  <div class="title" id="sel_title">NO SELECTION</div>
+  <div class="row"><span class="k">ID</span><span class="v" id="sel_id">----</span></div>
+  <div class="row"><span class="k">NATION</span><span class="v" id="sel_ct">----</span></div>
+  <div class="row"><span class="k">TYPE</span><span class="v" id="sel_tp">----</span></div>
+  <div class="row"><span class="k">LAT</span><span class="v" id="sel_la">----</span></div>
+  <div class="row"><span class="k">LON</span><span class="v" id="sel_lo">----</span></div>
+  <div class="row"><span class="k">ALT</span><span class="v" id="sel_al">----</span></div>
+  <div class="row"><span class="k">HDG</span><span class="v" id="sel_hd">----</span></div>
+  <div class="row"><span class="k">SPD</span><span class="v" id="sel_sp">----</span></div>
+</div>
+
+<div id="br" class="panel">
+  <h3>[CAMERA]</h3>
+  <div class="row"><span class="k">LAT</span><span class="v" id="camLat">0.00</span></div>
+  <div class="row"><span class="k">LON</span><span class="v" id="camLon">0.00</span></div>
+  <div class="row"><span class="k">ALT</span><span class="v" id="camAlt">0</span></div>
+</div>
+
+<div id="legend" class="panel">
+  <span><span class="dot" style="color:#3df0ff;background:#3df0ff"></span>AIR / CIV</span>
+  <span><span class="dot" style="color:#ff2d9c;background:#ff2d9c"></span>MIL</span>
+  <span><span class="dot" style="color:#7affc8;background:#7affc8"></span>NAVAL / CIV</span>
+  <span><span class="dot" style="color:#ffffff;background:#ffffff"></span>SELECTED</span>
+  <span class="k" style="margin-left:16px">[1]AIR [2]NAVAL [3]ALL [F]FOLLOW</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.117/Build/Cesium/Cesium.js"></script>
+<script>window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.117/Build/Cesium/';</script>
+<script src="./js/cop.js"></script>
+</body>
+</html>
