@@ -15,6 +15,7 @@
     "express": "^4.16.4",
     "fs": "0.0.1-security",
     "mongoose": "^5.5.7",
-    "nodemon": "^2.0.6"
+    "nodemon": "^2.0.6",
+    "ws": "^8.17.0"
   }
 }

@@ -55,6 +55,19 @@ app.get('/api/maps/strangereal/:z/:x/:y.png', map.checkZXY, map.getTile);
 const polygon = require('./controllers/polygon')
 app.get('/api/polygons/:id', polygon.getPolygon);
 
+// live tracking (aircraft via OpenSky, vessels via AISStream)
+const tracking = require('./controllers/tracking');
+app.get('/api/tracking/aircraft', tracking.getAircraft);
+app.get('/api/tracking/vessels', tracking.getVessels);
+app.get('/api/tracking/all', tracking.getAll);
+app.get('/api/tracking/stream', tracking.streamAll);
+// Kick off AIS subscription at boot so vessels are ready on first request.
+try { tracking._startAisStream(); } catch (e) { /* non-fatal */ }
+
+// static reference data (military bases, nation polygons)
+const reference = require('./controllers/reference');
+app.get('/api/reference/bases', reference.getBases);
+
 // setup server
 const http = require('http');
 const PORT = 3000;

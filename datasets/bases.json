@@ -1,0 +1,62 @@
+{
+  "sources": [
+    "Wikipedia public lists of air bases, naval stations, and military installations by country.",
+    "Geographic coordinates rounded to 3 decimals; used for display only.",
+    "Free to extend: add { name, country, iso2, branch, lat, lon, type } entries."
+  ],
+  "bases": [
+    { "name": "Edwards AFB",        "country": "United States", "iso2": "US", "branch": "USAF",  "type": "airbase",   "lat": 34.905,  "lon": -117.883 },
+    { "name": "Nellis AFB",         "country": "United States", "iso2": "US", "branch": "USAF",  "type": "airbase",   "lat": 36.236,  "lon": -115.034 },
+    { "name": "Andrews AFB",        "country": "United States", "iso2": "US", "branch": "USAF",  "type": "airbase",   "lat": 38.810,  "lon": -76.866 },
+    { "name": "Ramstein AB",        "country": "Germany",       "iso2": "DE", "branch": "USAFE", "type": "airbase",   "lat": 49.437,  "lon": 7.600 },
+    { "name": "RAF Lakenheath",     "country": "United Kingdom","iso2": "GB", "branch": "USAFE", "type": "airbase",   "lat": 52.409,  "lon": 0.561 },
+    { "name": "RAF Mildenhall",     "country": "United Kingdom","iso2": "GB", "branch": "USAFE", "type": "airbase",   "lat": 52.362,  "lon": 0.486 },
+    { "name": "Aviano AB",          "country": "Italy",         "iso2": "IT", "branch": "USAFE", "type": "airbase",   "lat": 46.031,  "lon": 12.596 },
+    { "name": "Kadena AB",          "country": "Japan",         "iso2": "JP", "branch": "USAF",  "type": "airbase",   "lat": 26.355,  "lon": 127.768 },
+    { "name": "Yokota AB",          "country": "Japan",         "iso2": "JP", "branch": "USAF",  "type": "airbase",   "lat": 35.749,  "lon": 139.348 },
+    { "name": "Osan AB",            "country": "South Korea",   "iso2": "KR", "branch": "USAF",  "type": "airbase",   "lat": 37.090,  "lon": 127.030 },
+    { "name": "Andersen AFB",       "country": "Guam",          "iso2": "GU", "branch": "USAF",  "type": "airbase",   "lat": 13.584,  "lon": 144.924 },
+    { "name": "Diego Garcia",       "country": "BIOT",          "iso2": "IO", "branch": "USAF",  "type": "airbase",   "lat": -7.313,  "lon": 72.411 },
+    { "name": "Thule AB",           "country": "Greenland",     "iso2": "GL", "branch": "USSF",  "type": "airbase",   "lat": 76.531,  "lon": -68.703 },
+    { "name": "Al Udeid AB",        "country": "Qatar",         "iso2": "QA", "branch": "USAFCENT","type": "airbase", "lat": 25.117,  "lon": 51.315 },
+    { "name": "Incirlik AB",        "country": "Turkey",        "iso2": "TR", "branch": "USAFE", "type": "airbase",   "lat": 37.002,  "lon": 35.426 },
+
+    { "name": "Norfolk Naval Station",    "country": "United States", "iso2": "US", "branch": "USN", "type": "naval", "lat": 36.947,  "lon": -76.330 },
+    { "name": "San Diego Naval Base",     "country": "United States", "iso2": "US", "branch": "USN", "type": "naval", "lat": 32.682,  "lon": -117.130 },
+    { "name": "Pearl Harbor",             "country": "United States", "iso2": "US", "branch": "USN", "type": "naval", "lat": 21.364,  "lon": -157.977 },
+    { "name": "Yokosuka Naval Base",      "country": "Japan",         "iso2": "JP", "branch": "USN", "type": "naval", "lat": 35.290,  "lon": 139.665 },
+    { "name": "Naval Station Rota",       "country": "Spain",         "iso2": "ES", "branch": "USN", "type": "naval", "lat": 36.645,  "lon": -6.350 },
+    { "name": "HMNB Portsmouth",          "country": "United Kingdom","iso2": "GB", "branch": "RN",  "type": "naval", "lat": 50.804,  "lon": -1.101 },
+    { "name": "Toulon Naval Base",        "country": "France",        "iso2": "FR", "branch": "MN",  "type": "naval", "lat": 43.118,  "lon": 5.931 },
+    { "name": "Severomorsk",              "country": "Russia",        "iso2": "RU", "branch": "VMF", "type": "naval", "lat": 69.078,  "lon": 33.415 },
+    { "name": "Vladivostok",              "country": "Russia",        "iso2": "RU", "branch": "VMF", "type": "naval", "lat": 43.115,  "lon": 131.885 },
+    { "name": "Qingdao Naval Base",       "country": "China",         "iso2": "CN", "branch": "PLAN","type": "naval", "lat": 36.067,  "lon": 120.383 },
+    { "name": "Yulin Naval Base",         "country": "China",         "iso2": "CN", "branch": "PLAN","type": "naval", "lat": 18.223,  "lon": 109.691 },
+    { "name": "Mumbai Naval Dockyard",    "country": "India",         "iso2": "IN", "branch": "IN",  "type": "naval", "lat": 18.924,  "lon": 72.831 },
+
+    { "name": "Engels-2",           "country": "Russia",   "iso2": "RU", "branch": "VKS", "type": "airbase", "lat": 51.483,  "lon": 46.210 },
+    { "name": "Khmeimim AB",        "country": "Syria",    "iso2": "SY", "branch": "VKS", "type": "airbase", "lat": 35.411,  "lon": 35.948 },
+    { "name": "Kubinka AB",         "country": "Russia",   "iso2": "RU", "branch": "VKS", "type": "airbase", "lat": 55.611,  "lon": 36.650 },
+    { "name": "Plesetsk Cosmodrome","country": "Russia",   "iso2": "RU", "branch": "VKS", "type": "airbase", "lat": 62.926,  "lon": 40.574 },
+
+    { "name": "Shenyang Airbase",   "country": "China",    "iso2": "CN", "branch": "PLAAF","type": "airbase", "lat": 41.640, "lon": 123.483 },
+    { "name": "Cangzhou Airbase",   "country": "China",    "iso2": "CN", "branch": "PLAAF","type": "airbase", "lat": 38.306, "lon": 116.855 },
+    { "name": "Hotan Airbase",      "country": "China",    "iso2": "CN", "branch": "PLAAF","type": "airbase", "lat": 37.039, "lon": 79.865 },
+
+    { "name": "Hmeimim/Latakia",    "country": "Syria",    "iso2": "SY", "branch": "SyAF","type": "airbase", "lat": 35.401, "lon": 35.947 },
+    { "name": "Tel Nof Airbase",    "country": "Israel",   "iso2": "IL", "branch": "IAF", "type": "airbase", "lat": 31.839, "lon": 34.821 },
+    { "name": "Hatzerim Airbase",   "country": "Israel",   "iso2": "IL", "branch": "IAF", "type": "airbase", "lat": 31.233, "lon": 34.663 },
+
+    { "name": "CFB Trenton",        "country": "Canada",   "iso2": "CA", "branch": "RCAF","type": "airbase", "lat": 44.119, "lon": -77.528 },
+    { "name": "CFB Cold Lake",      "country": "Canada",   "iso2": "CA", "branch": "RCAF","type": "airbase", "lat": 54.405, "lon": -110.279 },
+
+    { "name": "Istres-Le Tubé",     "country": "France",   "iso2": "FR", "branch": "AdA", "type": "airbase", "lat": 43.523, "lon": 4.924 },
+    { "name": "Saint-Dizier",       "country": "France",   "iso2": "FR", "branch": "AdA", "type": "airbase", "lat": 48.636, "lon": 4.899 },
+
+    { "name": "Hindan AFS",         "country": "India",    "iso2": "IN", "branch": "IAF", "type": "airbase", "lat": 28.706, "lon": 77.360 },
+    { "name": "Ambala AFS",         "country": "India",    "iso2": "IN", "branch": "IAF", "type": "airbase", "lat": 30.368, "lon": 76.817 },
+
+    { "name": "RAAF Williamtown",   "country": "Australia","iso2": "AU", "branch": "RAAF","type": "airbase", "lat": -32.795,"lon": 151.835 },
+    { "name": "RAAF Tindal",        "country": "Australia","iso2": "AU", "branch": "RAAF","type": "airbase", "lat": -14.521,"lon": 132.378 }
+  ]
+}
