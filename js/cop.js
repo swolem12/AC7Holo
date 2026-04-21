@@ -67,15 +67,22 @@
     scene.skyAtmosphere.brightnessShift = -0.1;
     scene.backgroundColor = Cesium.Color.fromCssColorString('#02060b');
     scene.globe.enableLighting = false;
+    // Make the globe opaque to its own depth so billboards on the far side
+    // are correctly occluded by the Earth (no more "hollow globe" bleed).
+    scene.globe.translucency.enabled = false;
+    scene.globe.depthTestAgainstTerrain = true;
     viewer.cesiumWidget.creditContainer.style.display = 'none';
 
     // Desaturate imagery for a radar feel (applies once the base layer exists).
     function tintBaseLayer() {
         const layer = viewer.imageryLayers.get(0);
         if (!layer) return;
-        layer.saturation = 0.25;
-        layer.brightness = 0.85;
-        layer.contrast = 1.2;
+        // Previously tinted very dark + low saturation, which made the globe
+        // blend into space and made moving icons visually disappear. Keep
+        // some holographic tint but let actual land/ocean show through.
+        layer.saturation = 0.55;
+        layer.brightness = 1.05;
+        layer.contrast = 1.15;
         layer.hue = 3.4; // push toward cyan
     }
     tintBaseLayer();
@@ -163,9 +170,101 @@
   <path fill="white" stroke="white" stroke-width="0.5" stroke-linejoin="round"
     d="M0,-12 L5,-3 L5,8 L3,12 L-3,12 L-5,8 L-5,-3 Z"/>
 </svg>`);
+    // Cargo ship: long flat hull with stacked containers.
+    const CARGO_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="44" viewBox="-10 -16 20 32">
+  <g fill="white" stroke="white" stroke-width="0.4" stroke-linejoin="round">
+    <path d="M0,-15 L4,-9 L4,10 L2.5,14 L-2.5,14 L-4,10 L-4,-9 Z"/>
+    <rect x="-3" y="-7" width="6" height="2.2"/>
+    <rect x="-3" y="-4" width="6" height="2.2"/>
+    <rect x="-3" y="-1" width="6" height="2.2"/>
+    <rect x="-3" y="2" width="6" height="2.2"/>
+    <rect x="-1.6" y="6" width="3.2" height="3.2"/>
+  </g>
+</svg>`);
+    // Tanker: smooth hull with two cylindrical tank domes.
+    const TANKER_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="44" viewBox="-10 -16 20 32">
+  <g fill="white" stroke="white" stroke-width="0.4" stroke-linejoin="round">
+    <path d="M0,-15 L4.2,-9 L4.2,10 L2.5,14 L-2.5,14 L-4.2,10 L-4.2,-9 Z"/>
+    <ellipse cx="0" cy="-4" rx="2.8" ry="1.6"/>
+    <ellipse cx="0" cy="2"  rx="2.8" ry="1.6"/>
+    <rect x="-1.4" y="7" width="2.8" height="3.2"/>
+  </g>
+</svg>`);
+    // Passenger ship / ferry / cruise: tall superstructure.
+    const PASSENGER_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="44" viewBox="-10 -16 20 32">
+  <g fill="white" stroke="white" stroke-width="0.4" stroke-linejoin="round">
+    <path d="M0,-15 L4,-10 L4,10 L2.5,14 L-2.5,14 L-4,10 L-4,-10 Z"/>
+    <rect x="-3" y="-8" width="6" height="12" rx="0.6"/>
+    <rect x="-2.2" y="-6" width="1.2" height="1.2" fill="black"/>
+    <rect x="-0.6" y="-6" width="1.2" height="1.2" fill="black"/>
+    <rect x="1.0"  y="-6" width="1.2" height="1.2" fill="black"/>
+    <rect x="-2.2" y="-3" width="1.2" height="1.2" fill="black"/>
+    <rect x="-0.6" y="-3" width="1.2" height="1.2" fill="black"/>
+    <rect x="1.0"  y="-3" width="1.2" height="1.2" fill="black"/>
+  </g>
+</svg>`);
+    // Naval / warship: angular hull with deck gun + mast.
+    const NAVAL_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="44" viewBox="-10 -16 20 32">
+  <g fill="white" stroke="white" stroke-width="0.4" stroke-linejoin="round">
+    <path d="M0,-15 L3.6,-9 L3.6,9 L2.2,14 L-2.2,14 L-3.6,9 L-3.6,-9 Z"/>
+    <rect x="-0.4" y="-13" width="0.8" height="6"/>
+    <rect x="-2"   y="-5"  width="4"   height="3"/>
+    <polygon points="0,-9 -1.6,-5 1.6,-5"/>
+    <rect x="-1"   y="3"   width="2"   height="5"/>
+  </g>
+</svg>`);
+    // Fishing / tug / small craft: small stubby hull.
+    const FISHING_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="34" viewBox="-8 -12 16 24">
+  <g fill="white" stroke="white" stroke-width="0.4" stroke-linejoin="round">
+    <path d="M0,-11 L3.6,-4 L3.6,7 L2.2,11 L-2.2,11 L-3.6,7 L-3.6,-4 Z"/>
+    <rect x="-1.8" y="-2" width="3.6" height="4.5"/>
+    <rect x="-0.3" y="-7" width="0.6" height="5"/>
+  </g>
+</svg>`);
+    // Yacht / sailing / pleasure craft.
+    const YACHT_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="34" viewBox="-8 -12 16 24">
+  <g fill="white" stroke="white" stroke-width="0.4" stroke-linejoin="round">
+    <path d="M-3.6,6 L3.6,6 L2.4,10 L-2.4,10 Z"/>
+    <rect x="-0.25" y="-11" width="0.5" height="17"/>
+    <polygon points="0.4,-10 4,5 0.4,5"/>
+    <polygon points="-0.4,-6 -3,5 -0.4,5"/>
+  </g>
+</svg>`);
     const GROUND_SVG = svgUrl(`
 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="-10 -10 20 20">
   <circle cx="0" cy="0" r="6" fill="white" stroke="white" stroke-width="1"/>
+</svg>`);
+
+    // Facility icons for route endpoints. These are draw-once-rotation-fixed
+    // billboards (alignedAxis=Z keeps them upright as the camera moves).
+    // Airport: control tower + runway cross.
+    const AIRPORT_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="-15 -15 30 30">
+  <g fill="white" stroke="white" stroke-width="0.8" stroke-linejoin="round">
+    <rect x="-11" y="-0.8" width="22" height="1.6" transform="rotate(35)"/>
+    <rect x="-11" y="-0.8" width="22" height="1.6" transform="rotate(-35)"/>
+    <rect x="-1.2" y="-11" width="2.4" height="13"/>
+    <polygon points="-3,-11 3,-11 1.5,-13 -1.5,-13"/>
+    <circle cx="0" cy="-8" r="0.9" fill="black"/>
+  </g>
+</svg>`);
+    // Seaport: anchor symbol.
+    const PORT_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="-15 -15 30 30">
+  <g fill="none" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="-10" r="2.2" fill="white"/>
+    <line x1="0" y1="-7.5" x2="0" y2="10"/>
+    <line x1="-4" y1="-5" x2="4" y2="-5"/>
+    <path d="M-10,4 Q-10,10 0,11 Q10,10 10,4"/>
+    <line x1="-10" y1="4" x2="-7" y2="2.5"/>
+    <line x1="10"  y1="4" x2="7"  y2="2.5"/>
+  </g>
 </svg>`);
 
     // Published ICAO24 military ranges (abridged, major operators).
@@ -199,11 +298,25 @@
         return UNKNOWN_COLOR;
     }
 
-    // Pick the right silhouette for an entity. Helicopters (type starts with
-    // 'H' in ICAO AC type designators, e.g. H60, EC35) get rotor art, ground
-    // vehicles get a dot, everything airborne gets the jet silhouette.
+    // Pick the right silhouette for an entity. Ships are classified by AIS
+    // type code (30..89); aircraft by ICAO type designator.
+    // AIS categories: 30 fishing, 31-32 tug, 35 military, 36 sailing,
+    // 37 pleasure, 40-49 high-speed, 50-59 pilot/patrol, 60-69 passenger,
+    // 70-79 cargo, 80-89 tanker.
+    function shipIcon(d) {
+        const t = parseInt(d.type, 10);
+        if (!Number.isFinite(t)) return SHIP_SVG;
+        if (t === 30) return FISHING_SVG;
+        if (t === 31 || t === 32 || t === 33 || t === 52) return FISHING_SVG; // tugs/pilot small
+        if (t === 35) return NAVAL_SVG;
+        if (t === 36 || t === 37) return YACHT_SVG;
+        if (t >= 60 && t <= 69) return PASSENGER_SVG;
+        if (t >= 70 && t <= 79) return CARGO_SVG;
+        if (t >= 80 && t <= 89) return TANKER_SVG;
+        return SHIP_SVG;
+    }
     function iconFor(d) {
-        if (d.kind === 'sea') return SHIP_SVG;
+        if (d.kind === 'sea') return shipIcon(d);
         if (d.kind !== 'air') return GROUND_SVG;
         if (d.type === 'ground' || (d.alt != null && d.alt < 50 && (d.speed || 0) < 30)) return GROUND_SVG;
         const t = (d.type || '').toUpperCase();
@@ -260,7 +373,10 @@
                         return h != null ? Cesium.Math.toRadians(-h) : 0;
                     }, false),
                     alignedAxis: Cesium.Cartesian3.ZERO,
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                    // Depth test against the globe so far-side entities hide
+                    // behind the Earth; close-in icons still render on top of
+                    // terrain via the small buffer below.
+                    disableDepthTestDistance: 1000,
                     heightReference: Cesium.HeightReference.NONE
                 },
                 // 5-minute glowing trail; the trail length is in seconds.
@@ -735,7 +851,7 @@
                     color: col.withAlpha(0.35),
                     outlineColor: col,
                     outlineWidth: 1.5,
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 1000
                 },
                 label: {
                     text: b.name.toUpperCase(),
@@ -747,7 +863,7 @@
                     pixelOffset: new Cesium.Cartesian2(10, -6),
                     showBackground: false,
                     distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 6_000_000),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 1000
                 },
                 description: `${b.branch || ''} · ${b.country}`
             });
@@ -803,12 +919,15 @@
             : Cesium.Color.fromCssColorString('#ffb347'); // amber = arrival
         airportPins.entities.add({
             position: Cesium.Cartesian3.fromDegrees(ap.lon, ap.lat, 0),
-            point: {
-                pixelSize: 5,
-                color: col.withAlpha(0.9),
-                outlineColor: col,
-                outlineWidth: 1,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            billboard: {
+                image: AIRPORT_SVG,
+                color: col,
+                scale: 0.7,
+                // Screen-aligned — ignore aircraft-style heading rotation.
+                alignedAxis: Cesium.Cartesian3.ZERO,
+                rotation: 0,
+                disableDepthTestDistance: 1000,
+                heightReference: Cesium.HeightReference.NONE
             },
             label: {
                 text: ap.iata,
@@ -817,10 +936,11 @@
                 outlineColor: Cesium.Color.BLACK,
                 outlineWidth: 2,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -14),
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                pixelOffset: new Cesium.Cartesian2(0, -20),
+                disableDepthTestDistance: 1000,
                 scaleByDistance: new Cesium.NearFarScalar(5e5, 1.0, 1e7, 0.6)
-            }
+            },
+            _apInfo: { ap, kind }
         });
     }
 
