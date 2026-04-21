@@ -133,12 +133,59 @@
 
     // ---- Entity bookkeeping --------------------------------------------------
     const entities = new Map(); // id -> Cesium Entity
+    const routeCache = new Map();       // callsign -> route info | null
+    const pendingRoutes = new Set();    // callsigns awaiting lookup
+    // Common ICAO airline prefixes. Used to show the operator name in the
+    // selection panel even before adsb.lol resolves the full route.
+    const AIRLINE_NAMES = {
+        'AAL':'American Airlines','UAL':'United Airlines','DAL':'Delta Air Lines',
+        'SWA':'Southwest','JBU':'JetBlue','ASA':'Alaska','FFT':'Frontier','NKS':'Spirit',
+        'ACA':'Air Canada','WJA':'WestJet','BAW':'British Airways','VIR':'Virgin Atlantic',
+        'AFR':'Air France','KLM':'KLM','DLH':'Lufthansa','SWR':'Swiss','AUA':'Austrian',
+        'IBE':'Iberia','AZA':'ITA Airways','TAP':'TAP Portugal','SAS':'SAS',
+        'FIN':'Finnair','THY':'Turkish Airlines','UAE':'Emirates','QTR':'Qatar Airways',
+        'ETD':'Etihad','SVA':'Saudia','ELY':'El Al','MEA':'MEA',
+        'SIA':'Singapore Airlines','CPA':'Cathay Pacific','CCA':'Air China','CES':'China Eastern',
+        'CSN':'China Southern','ANA':'All Nippon','JAL':'Japan Airlines','KAL':'Korean Air',
+        'AAR':'Asiana','THA':'Thai Airways','QFA':'Qantas','VOZ':'Virgin Australia',
+        'ANZ':'Air New Zealand','AIC':'Air India','IGO':'IndiGo',
+        'RCH':'US Air Force (Reach)','SAM':'US Air Force (SAM)','NAVY':'US Navy',
+        'ARMY':'US Army','CNV':'US Navy','POLZON':'Police','LIFEGUARD':'Medevac'
+    };
     const AIR_COLOR_CIV = Cesium.Color.fromCssColorString('#3df0ff');
     const AIR_COLOR_MIL = Cesium.Color.fromCssColorString('#ff2d9c');
     const SEA_COLOR_CIV = Cesium.Color.fromCssColorString('#7affc8');
     const SEA_COLOR_MIL = Cesium.Color.fromCssColorString('#ff2d9c');
     const UNKNOWN_COLOR = Cesium.Color.fromCssColorString('#ffb300');
     const SEL_COLOR     = Cesium.Color.fromCssColorString('#ffffff');
+
+    // FlightRadar-style vector icons. SVG points NORTH (+Y up on screen) at
+    // rotation=0, then we apply screen-space rotation = -heading so the
+    // silhouette lines up with the compass bearing just like FR24 / ADSBX.
+    const svgUrl = svg => 'data:image/svg+xml;utf8,' + encodeURIComponent(svg.trim());
+    const PLANE_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="-20 -20 40 40">
+  <path fill="white" stroke="white" stroke-width="0.5" stroke-linejoin="round"
+    d="M0,-18 L2.2,-6 L18,3 L18,5.5 L2.2,1.5 L2.2,10 L7,13 L7,15 L0,13.5 L-7,15 L-7,13 L-2.2,10 L-2.2,1.5 L-18,5.5 L-18,3 L-2.2,-6 Z"/>
+</svg>`);
+    const HELI_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="-20 -20 40 40">
+  <g fill="white" stroke="white" stroke-width="0.8">
+    <rect x="-18" y="-1.5" width="36" height="3" rx="1.2"/>
+    <rect x="-1.5" y="-18" width="3" height="36" rx="1.2"/>
+    <circle cx="0" cy="0" r="5"/>
+    <rect x="-0.8" y="5" width="1.6" height="9"/>
+  </g>
+</svg>`);
+    const SHIP_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="-10 -14 20 28">
+  <path fill="white" stroke="white" stroke-width="0.5" stroke-linejoin="round"
+    d="M0,-12 L5,-3 L5,8 L3,12 L-3,12 L-5,8 L-5,-3 Z"/>
+</svg>`);
+    const GROUND_SVG = svgUrl(`
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="-10 -10 20 20">
+  <circle cx="0" cy="0" r="6" fill="white" stroke="white" stroke-width="1"/>
+</svg>`);
 
     // Published ICAO24 military ranges (abridged, major operators).
     const MIL_ICAO24_RANGES = [
@@ -169,6 +216,18 @@
         if (d.kind === 'air') return isMilAircraft(d) ? AIR_COLOR_MIL : AIR_COLOR_CIV;
         if (d.kind === 'sea') return isMilVessel(d)   ? SEA_COLOR_MIL : SEA_COLOR_CIV;
         return UNKNOWN_COLOR;
+    }
+
+    // Pick the right silhouette for an entity. Helicopters (type starts with
+    // 'H' in ICAO AC type designators, e.g. H60, EC35) get rotor art, ground
+    // vehicles get a dot, everything airborne gets the jet silhouette.
+    function iconFor(d) {
+        if (d.kind === 'sea') return SHIP_SVG;
+        if (d.kind !== 'air') return GROUND_SVG;
+        if (d.type === 'ground' || (d.alt != null && d.alt < 50 && (d.speed || 0) < 30)) return GROUND_SVG;
+        const t = (d.type || '').toUpperCase();
+        if (t.startsWith('H') || t.startsWith('EC') || t.startsWith('R44')) return HELI_SVG;
+        return PLANE_SVG;
     }
 
     let filter = 'all';
@@ -208,12 +267,20 @@
                 id: d.id,
                 position: sampled,
                 orientation: new Cesium.VelocityOrientationProperty(sampled),
-                point: {
-                    pixelSize: d.kind === 'air' ? 7 : 8,
-                    color: color.withAlpha(0.95),
-                    outlineColor: color,
-                    outlineWidth: 1,
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                // FlightRadar-style silhouette icon. Color tints the white SVG,
+                // rotation is screen-space from compass heading (negated because
+                // Cesium rotation is CCW while compass bearing is CW-from-N).
+                billboard: {
+                    image: iconFor(d),
+                    color: color,
+                    scale: d.kind === 'air' ? 0.55 : 0.5,
+                    rotation: new Cesium.CallbackProperty(() => {
+                        const h = e && e._data && e._data.heading;
+                        return h != null ? Cesium.Math.toRadians(-h) : 0;
+                    }, false),
+                    alignedAxis: Cesium.Cartesian3.ZERO,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                    heightReference: Cesium.HeightReference.NONE
                 },
                 // 5-minute glowing trail; the trail length is in seconds.
                 path: {
@@ -311,17 +378,19 @@
         selected = e;
         const baseColor = colorFor(e._data);
         e._baseColor = baseColor;
-        e.point.color = SEL_COLOR;
-        e.point.pixelSize = 12;
-        e.point.outlineColor = SEL_COLOR;
+        if (e.billboard) {
+            e.billboard.color = SEL_COLOR;
+            e.billboard.scale = e._kind === 'air' ? 0.85 : 0.8;
+        }
         showSelPanel(e._data);
     }
     function clearSelection() {
         if (!selected) return;
         const baseColor = selected._baseColor || colorFor(selected._data);
-        selected.point.color = baseColor.withAlpha(0.95);
-        selected.point.pixelSize = selected._kind === 'air' ? 7 : 8;
-        selected.point.outlineColor = baseColor;
+        if (selected.billboard) {
+            selected.billboard.color = baseColor;
+            selected.billboard.scale = selected._kind === 'air' ? 0.55 : 0.5;
+        }
         selected = null;
         hideSelPanel();
     }
@@ -338,6 +407,36 @@
         $('sel_al').textContent = d.alt != null ? Math.round(d.alt) + ' m' : '---';
         $('sel_hd').textContent = d.heading != null ? Math.round(d.heading) + '°' : '---';
         $('sel_sp').textContent = d.speed != null ? Math.round(d.speed * 1.94384) + ' kt' : '---';
+        // Route info: resolve synchronously if cached, otherwise kick off a
+        // lookup so the panel populates as soon as adsb.lol answers.
+        const cs = (d.callsign || '').trim();
+        const airlineEl = $('sel_airline'), origEl = $('sel_orig'), destEl = $('sel_dest');
+        if (!cs || d.kind !== 'air') {
+            if (airlineEl) airlineEl.textContent = '---';
+            if (origEl) origEl.textContent = '---';
+            if (destEl) destEl.textContent = '---';
+            return;
+        }
+        const paintRoute = () => {
+            const r = routeCache.get(cs);
+            if (r) {
+                if (origEl) origEl.textContent = `${r.orig.iata || '?'} ${r.orig.name || ''}`.trim();
+                if (destEl) destEl.textContent = `${r.dest.iata || '?'} ${r.dest.name || ''}`.trim();
+            } else {
+                if (origEl) origEl.textContent = 'RESOLVING...';
+                if (destEl) destEl.textContent = 'RESOLVING...';
+            }
+            if (airlineEl) {
+                const airlineCode = cs.substring(0, 3);
+                airlineEl.textContent = AIRLINE_NAMES[airlineCode] || airlineCode || '---';
+            }
+        };
+        paintRoute();
+        if (!routeCache.has(cs)) {
+            pendingRoutes.add(cs);
+            // Re-paint after the batch lookup cycle.
+            setTimeout(() => { if (selected === entities.get(d.id)) paintRoute(); }, 3500);
+        }
     }
     function hideSelPanel() { $('bl').style.display = 'none'; }
     hideSelPanel();
@@ -499,8 +598,12 @@
     };
     function startAisBrowser(apiKey) {
         try {
+            console.log('[AIS] connecting to aisstream.io...');
             const ws = new WebSocket('wss://stream.aisstream.io/v0/stream');
+            let msgs = 0;
             ws.onopen = () => {
+                console.log('[AIS] socket open; subscribing globally');
+                $('status').textContent = 'AIS+DIRECT';
                 ws.send(JSON.stringify({
                     APIKey: apiKey,
                     BoundingBoxes: [[[-90, -180], [90, 180]]],
@@ -508,8 +611,11 @@
                 }));
             };
             ws.onmessage = ev => {
+                msgs++;
+                if (msgs === 1) console.log('[AIS] first message received, stream live');
                 try {
                     const m = JSON.parse(ev.data);
+                    if (m.error) { console.warn('[AIS] server error:', m.error); return; }
                     const meta = m.MetaData || {};
                     const mmsi = meta.MMSI || meta.MMSI_String;
                     if (!mmsi) return;
@@ -529,8 +635,11 @@
                     }]});
                 } catch {}
             };
-            ws.onerror = () => console.warn('AISStream WS error');
-            ws.onclose = () => setTimeout(() => startAisBrowser(apiKey), 5000);
+            ws.onerror = (e) => console.warn('[AIS] socket error', e);
+            ws.onclose = ev => {
+                console.warn('[AIS] socket closed (code', ev.code, ') reconnecting in 5s');
+                setTimeout(() => startAisBrowser(apiKey), 5000);
+            };
         } catch (e) { console.warn('AISStream start failed:', e.message); }
     }
 
@@ -605,8 +714,11 @@
             pollTimer = setInterval(pollTick, 10_000);
         }
         // If we're on a static site (no backend) and a key is provided, open AIS WS.
-        if (!(await HAS_BACKEND_P) && window.AISSTREAM_KEY) {
+        const hasBackend = await HAS_BACKEND_P;
+        if (!hasBackend && window.AISSTREAM_KEY) {
             startAisBrowser(window.AISSTREAM_KEY);
+        } else if (!hasBackend) {
+            console.warn('[AIS] no window.AISSTREAM_KEY set — vessels will not appear on static deployment');
         }
     })();
 
@@ -695,10 +807,8 @@
     viewer.dataSources.add(routeLines);
     viewer.dataSources.add(airportPins);
 
-    const routeCache = new Map();       // callsign -> { orig:{lat,lon,iata,name}, dest:{...} } | null (miss)
     const routeEntityByCs = new Map();  // callsign -> Cesium polyline entity
     const airportSeen = new Set();      // iata we've already dropped a pin for
-    const pendingRoutes = new Set();    // callsigns awaiting lookup
     let routesVisible = true;
 
     function addAirportPin(ap, kind) {
@@ -868,9 +978,10 @@
                 const d = selected._data;
                 alert(`${(d.callsign || d.id).toUpperCase()}\nNation: ${d.country || 'UNKNOWN'}\nType: ${d.kind}\nLast seen: ${new Date(d.updated * 1000).toISOString()}`);
             } else if (act === 'designate') {
-                selected.point.color = Cesium.Color.RED;
-                selected.point.outlineColor = Cesium.Color.RED;
-                selected.point.pixelSize = 14;
+                if (selected.billboard) {
+                    selected.billboard.color = Cesium.Color.RED;
+                    selected.billboard.scale = 1.0;
+                }
             }
             radial.classList.remove('show');
         });
