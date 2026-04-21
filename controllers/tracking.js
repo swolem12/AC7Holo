@@ -26,26 +26,57 @@ const keys = require('../config/keys');
 // ---------- Aircraft: OpenSky ----------------------------------------------
 
 const OPENSKY_URL = 'https://opensky-network.org/api/states/all';
+const OPENSKY_TOKEN_URL = 'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token';
 const OPENSKY_TTL_MS = 10_000; // OpenSky anonymous cap ~10s; respect it.
 
 let aircraftCache = { t: 0, data: [] };
+let openskyToken = { access_token: null, expires_at: 0 };
 
-function httpGetJson(url, auth) {
+function httpRequest(url, opts, body) {
     return new Promise((resolve, reject) => {
-        const opts = {};
-        if (auth) opts.headers = { Authorization: 'Basic ' + Buffer.from(auth).toString('base64') };
-        https.get(url, opts, res => {
-            if (res.statusCode !== 200) {
-                res.resume();
-                return reject(new Error('HTTP ' + res.statusCode));
-            }
-            let body = '';
-            res.on('data', c => body += c);
+        const req = https.request(url, opts, res => {
+            let data = '';
+            res.on('data', c => data += c);
             res.on('end', () => {
-                try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    return reject(new Error('HTTP ' + res.statusCode + ': ' + data.slice(0, 200)));
+                }
+                try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
             });
-        }).on('error', reject);
+        });
+        req.on('error', reject);
+        if (body) req.write(body);
+        req.end();
     });
+}
+
+async function getOpenSkyOAuthToken() {
+    const c = keys.openskyClient;
+    if (!c || !c.clientId || !c.clientSecret) return null;
+    if (openskyToken.access_token && Date.now() < openskyToken.expires_at - 30_000) {
+        return openskyToken.access_token;
+    }
+    const body = new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: c.clientId,
+        client_secret: c.clientSecret
+    }).toString();
+    const json = await httpRequest(OPENSKY_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': Buffer.byteLength(body)
+        }
+    }, body);
+    openskyToken = {
+        access_token: json.access_token,
+        expires_at: Date.now() + (json.expires_in || 1800) * 1000
+    };
+    return openskyToken.access_token;
+}
+
+function httpGetJson(url, headers) {
+    return httpRequest(url, { method: 'GET', headers: headers || {} });
 }
 
 // ICAO24 address prefix -> country (abridged; covers major bloc).
@@ -85,8 +116,17 @@ function icaoCountry(icao24) {
 }
 
 async function refreshAircraft() {
-    const auth = keys.openskyAuth; // "user:pass" or falsy
-    const raw = await httpGetJson(OPENSKY_URL, auth);
+    const headers = {};
+    const token = await getOpenSkyOAuthToken().catch(e => {
+        console.warn('[tracking] OpenSky OAuth failed, falling back:', e.message);
+        return null;
+    });
+    if (token) {
+        headers.Authorization = 'Bearer ' + token;
+    } else if (keys.openskyAuth) {
+        headers.Authorization = 'Basic ' + Buffer.from(keys.openskyAuth).toString('base64');
+    }
+    const raw = await httpGetJson(OPENSKY_URL, headers);
     const out = [];
     for (const s of (raw.states || [])) {
         const [icao24, callsign, origin_country, , , lon, lat, baro_alt, on_ground,

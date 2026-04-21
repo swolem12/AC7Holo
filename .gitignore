@@ -1,6 +1,13 @@
 # Map level 6
 assets/maps/strangereal/6
 
+# Secrets — never commit these
+credentials.json
+config/keys_local.js
+.env
+.env.local
+*.secrets.json
+
 # OS Files
 Thumbs.db
 .DS_Store

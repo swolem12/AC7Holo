@@ -1,14 +1,36 @@
+const fs = require('fs');
+const path = require('path');
+
+// Try to load local secrets in this order:
+//   1. config/keys_local.js   (git-ignored, wins over everything)
+//   2. ../credentials.json    (OpenSky OAuth2 client-credentials dump)
+//   3. process.env            (CI / production-style)
+let local = {};
+try { local = require('./keys_local'); } catch {}
+
+let openskyClient = null;
+try {
+    const credPath = path.join(__dirname, '..', 'credentials.json');
+    if (fs.existsSync(credPath)) {
+        const c = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+        if (c.clientId && c.clientSecret) {
+            openskyClient = { clientId: c.clientId, clientSecret: c.clientSecret };
+        }
+    }
+} catch (e) { console.warn('[keys] credentials.json unreadable:', e.message); }
+
 module.exports = {
-    mongoURI: `mongodb://localhost:27017/strangereal-db`,
-    secretOrKey: '<!-- SECRET OR KEY -->',
+    mongoURI: local.mongoURI || process.env.MONGO_URI || `mongodb://localhost:27017/strangereal-db`,
+    secretOrKey: local.secretOrKey || process.env.SECRET_OR_KEY || '<!-- SECRET OR KEY -->',
 
-    // Optional: OpenSky basic-auth credentials "username:password".
-    // Anonymous usage works but is rate-limited to one poll per 10s.
-    openskyAuth: process.env.OPENSKY_AUTH || null,
+    // OpenSky OAuth2 (new format): { clientId, clientSecret }
+    openskyClient: local.openskyClient || openskyClient,
+    // Legacy Basic auth: "username:password"
+    openskyAuth: local.openskyAuth || process.env.OPENSKY_AUTH || null,
 
-    // Required for live vessel tracking. Get a free key at https://aisstream.io/
-    aisStreamKey: process.env.AISSTREAM_KEY || null,
+    // AISStream.io API key. Free tier at https://aisstream.io/
+    aisStreamKey: local.aisStreamKey || process.env.AISSTREAM_KEY || null,
 
-    // Optional: Cesium Ion token for high-res terrain/imagery.
-    cesiumIonToken: process.env.CESIUM_ION_TOKEN || null
+    // Cesium Ion token for premium imagery/terrain.
+    cesiumIonToken: local.cesiumIonToken || process.env.CESIUM_ION_TOKEN || null
 };
