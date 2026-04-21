@@ -388,19 +388,19 @@
                 // that the full string fits without cluttering the view.
                 label: {
                     text: (d.callsign || d.id.split(':').pop() || '').toUpperCase(),
-                    font: 'bold 11px "Share Tech Mono", monospace',
+                    font: 'bold 14px "Share Tech Mono", monospace',
                     fillColor: color,
                     outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 2.5,
+                    outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    pixelOffset: new Cesium.Cartesian2(12, 0),
+                    pixelOffset: new Cesium.Cartesian2(14, 0),
                     horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
                     verticalOrigin: Cesium.VerticalOrigin.CENTER,
                     showBackground: true,
-                    backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.7),
-                    backgroundPadding: new Cesium.Cartesian2(5, 3),
-                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3_000_000),
-                    scaleByDistance: new Cesium.NearFarScalar(5e4, 1.3, 3e6, 0.8),
+                    backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.8),
+                    backgroundPadding: new Cesium.Cartesian2(6, 4),
+                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5_000_000),
+                    scaleByDistance: new Cesium.NearFarScalar(5e4, 1.6, 5e6, 0.9),
                     disableDepthTestDistance: 1000
                 },
                 // 5-minute glowing trail; the trail length is in seconds.
@@ -880,18 +880,18 @@
                 },
                 label: {
                     text: b.name.toUpperCase(),
-                    font: 'bold 12px "Share Tech Mono", monospace',
+                    font: 'bold 15px "Share Tech Mono", monospace',
                     fillColor: col,
                     outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 2.5,
+                    outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    pixelOffset: new Cesium.Cartesian2(10, -6),
+                    pixelOffset: new Cesium.Cartesian2(12, -8),
                     showBackground: true,
-                    backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.55),
-                    backgroundPadding: new Cesium.Cartesian2(5, 3),
-                    // Labels at readable size when close (1.4x), still visible
-                    // at global view (0.8x) but not cluttering.
-                    scaleByDistance: new Cesium.NearFarScalar(1e5, 1.4, 1.5e7, 0.8),
+                    backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.75),
+                    backgroundPadding: new Cesium.Cartesian2(7, 4),
+                    // Labels at readable size when close (1.8x), still visible
+                    // at global view (0.9x) but not cluttering.
+                    scaleByDistance: new Cesium.NearFarScalar(1e5, 1.8, 1.5e7, 0.9),
                     distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2.5e7),
                     disableDepthTestDistance: 1000
                 },
@@ -962,17 +962,17 @@
             },
             label: {
                 text: ap.iata + (ap.name ? '\n' + ap.name.toUpperCase() : ''),
-                font: 'bold 11px "Share Tech Mono", monospace',
+                font: 'bold 14px "Share Tech Mono", monospace',
                 fillColor: col,
                 outlineColor: Cesium.Color.BLACK,
-                outlineWidth: 2.5,
+                outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -22),
+                pixelOffset: new Cesium.Cartesian2(0, -24),
                 showBackground: true,
-                backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.6),
-                backgroundPadding: new Cesium.Cartesian2(5, 3),
+                backgroundColor: new Cesium.Color(0, 0.05, 0.08, 0.8),
+                backgroundPadding: new Cesium.Cartesian2(6, 4),
                 disableDepthTestDistance: 1000,
-                scaleByDistance: new Cesium.NearFarScalar(1e5, 1.5, 1.5e7, 0.7),
+                scaleByDistance: new Cesium.NearFarScalar(1e5, 1.7, 1.5e7, 0.8),
                 distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2.5e7)
             },
             _apInfo: { ap, kind }
