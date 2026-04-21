@@ -700,12 +700,28 @@
         '563':'Singapore','503':'Australia','636':'Liberia','371':'Panama'
     };
     let aisMsgCount = 0;
+    let aisStatusEl = null; // resolved lazily since it lives in HUD
+    function setAisStat(txt) {
+        if (!aisStatusEl) aisStatusEl = document.getElementById('aisStat');
+        if (aisStatusEl) aisStatusEl.textContent = txt;
+    }
+    function bumpAisMsg() {
+        aisMsgCount++;
+        const el = document.getElementById('aisMsg');
+        if (el) el.textContent = aisMsgCount.toLocaleString();
+    }
     function startAisBrowser(apiKey) {
         try {
             console.info('[AIS] connecting to aisstream.io…');
+            setAisStat('CONNECTING');
             const ws = new WebSocket('wss://stream.aisstream.io/v0/stream');
             ws.onopen = () => {
                 console.info('[AIS] WS open — subscribing to global bounding box');
+                setAisStat('SUBSCRIBED');
+                // aisstream.io limits each subscription to a 5x5 deg bbox in
+                // their docs, but in practice will accept a single global box
+                // and stream everything it sees. Use a single global box plus
+                // an explicit filter to message types we care about.
                 ws.send(JSON.stringify({
                     APIKey: apiKey,
                     BoundingBoxes: [[[-90, -180], [90, 180]]],
@@ -715,9 +731,16 @@
             ws.onmessage = ev => {
                 try {
                     const m = JSON.parse(ev.data);
-                    if (m.error || m.Error) { console.warn('[AIS] error msg:', m.error || m.Error); return; }
-                    aisMsgCount++;
-                    if (aisMsgCount === 1) console.info('[AIS] first message received');
+                    if (m.error || m.Error) {
+                        console.warn('[AIS] error msg:', m.error || m.Error);
+                        setAisStat('ERROR');
+                        return;
+                    }
+                    bumpAisMsg();
+                    if (aisMsgCount === 1) {
+                        console.info('[AIS] first message received');
+                        setAisStat('STREAMING');
+                    }
                     const meta = m.MetaData || {};
                     const mmsi = meta.MMSI || meta.MMSI_String;
                     if (!mmsi) return;
@@ -737,12 +760,19 @@
                     }]});
                 } catch {}
             };
-            ws.onerror = err => console.warn('[AIS] WS error', err);
+            ws.onerror = err => {
+                console.warn('[AIS] WS error', err);
+                setAisStat('ERROR');
+            };
             ws.onclose = ev => {
                 console.warn(`[AIS] WS closed code=${ev.code} reason=${ev.reason || '(none)'} — reconnecting in 5s`);
+                setAisStat('RECONNECTING');
                 setTimeout(() => startAisBrowser(apiKey), 5000);
             };
-        } catch (e) { console.warn('AISStream start failed:', e.message); }
+        } catch (e) {
+            console.warn('AISStream start failed:', e.message);
+            setAisStat('FAIL');
+        }
     }
 
     async function pollTick() {
@@ -809,6 +839,15 @@
     }
 
     runBoot();
+    // Kick off feed. Show which sources we're using in the HUD so the user
+    // can see at a glance whether ADS-B and AIS are live.
+    (async () => {
+        const hasBackend = await HAS_BACKEND_P;
+        const adsbStat = document.getElementById('adsbStat');
+        const aisStat0 = document.getElementById('aisStat');
+        if (adsbStat) adsbStat.textContent = hasBackend ? 'BACKEND' : 'ADSB.LOL';
+        if (aisStat0) aisStat0.textContent = hasBackend ? 'BACKEND' : (window.AISSTREAM_KEY ? 'CONNECTING' : 'NO KEY');
+    })();
     pollTick(); // first frame immediately
     (async () => {
         const sseOk = await startSse();
