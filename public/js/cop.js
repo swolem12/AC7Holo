@@ -25,23 +25,24 @@
     // Cesium ion token is optional; without it we use OSM imagery only.
     if (window.CESIUM_ION_TOKEN) Cesium.Ion.defaultAccessToken = window.CESIUM_ION_TOKEN;
 
-    // Cesium 1.104+ replaced { imageryProvider } with { baseLayer }. Support both.
-    const osmProvider = new Cesium.UrlTemplateImageryProvider({
-        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        credit: '© OpenStreetMap',
-        maximumLevel: 19
-    });
     const viewerOpts = {
         animation: false, timeline: false, baseLayerPicker: false, geocoder: false,
         homeButton: false, sceneModePicker: false, navigationHelpButton: false,
         fullscreenButton: false, infoBox: false, selectionIndicator: false
     };
-    if (typeof Cesium.ImageryLayer !== 'undefined' && Cesium.ImageryLayer.fromProviderAsync) {
-        // New API (1.104+)
-        viewerOpts.baseLayer = new Cesium.ImageryLayer(osmProvider);
-    } else {
-        // Legacy API
-        viewerOpts.imageryProvider = osmProvider;
+    // If no Ion token, fall back to OSM raster tiles. With a token, let Cesium
+    // use its default Ion Bing Maps imagery (higher-res + reliable async load).
+    if (!window.CESIUM_ION_TOKEN) {
+        const osmProvider = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            credit: '© OpenStreetMap',
+            maximumLevel: 19
+        });
+        if (Cesium.ImageryLayer && Cesium.ImageryLayer.fromProviderAsync) {
+            viewerOpts.baseLayer = Cesium.ImageryLayer.fromProviderAsync(Promise.resolve(osmProvider));
+        } else {
+            viewerOpts.imageryProvider = osmProvider;
+        }
     }
 
     let viewer;
@@ -68,12 +69,17 @@
     scene.globe.enableLighting = false;
     viewer.cesiumWidget.creditContainer.style.display = 'none';
 
-    // Desaturate imagery for a radar feel.
-    const layer = viewer.imageryLayers.get(0);
-    layer.saturation = 0.25;
-    layer.brightness = 0.85;
-    layer.contrast = 1.2;
-    layer.hue = 3.4; // push toward cyan
+    // Desaturate imagery for a radar feel (applies once the base layer exists).
+    function tintBaseLayer() {
+        const layer = viewer.imageryLayers.get(0);
+        if (!layer) return;
+        layer.saturation = 0.25;
+        layer.brightness = 0.85;
+        layer.contrast = 1.2;
+        layer.hue = 3.4; // push toward cyan
+    }
+    tintBaseLayer();
+    viewer.imageryLayers.layerAdded.addEventListener(tintBaseLayer);
 
     viewer.camera.setView({
         destination: Cesium.Cartesian3.fromDegrees(0, 20, 22_000_000)
@@ -390,37 +396,92 @@
         return best ? best[1] : null;
     }
 
-    async function fetchOpenSkyDirect() {
-        try {
-            const r = await fetch('https://opensky-network.org/api/states/all');
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            const raw = await r.json();
-            const entities = [];
-            for (const s of (raw.states || [])) {
-                const [icao24, callsign, origin_country, , , lon, lat, baro_alt,
-                       on_ground, velocity, true_track, , , geo_alt] = s;
-                if (lat == null || lon == null) continue;
-                entities.push({
-                    id: 'a:' + icao24,
-                    kind: 'air',
-                    callsign: (callsign || '').trim() || null,
-                    country: origin_country || icaoCountry(icao24),
-                    iso2: null,
-                    lat, lon,
-                    alt: geo_alt != null ? geo_alt : baro_alt,
-                    heading: true_track,
-                    speed: velocity,
-                    type: on_ground ? 'ground' : 'airborne',
-                    updated: raw.time
-                });
+    // adsb.lol / OpenSky don't send CORS headers, so when we're running as a
+    // static site (e.g. GitHub Pages) we route the requests through a public
+    // CORS proxy. allorigins.win echoes the upstream body and adds the
+    // correct `Access-Control-Allow-Origin` header for the requesting origin.
+    const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+    const viaProxy = url => CORS_PROXY + encodeURIComponent(url);
+
+    async function fetchAircraftDirect() {
+        // Primary: adsb.lol — open, no auth, global coverage — via CORS proxy.
+        // Endpoint returns aircraft within 250 nm of a lat/lon; we tile a few
+        // strategic regions to get worldwide sampling without hammering a
+        // single point. 250 nm = ~463 km radius.
+        const regions = [
+            [40, -100],  // North America
+            [50,   10],  // Europe
+            [35,  105],  // East Asia
+            [-5,   35],  // Africa / Middle East
+            [-25, 135],  // Australia
+            [-15, -55],  // South America
+            [20,   80]   // India / South Asia
+        ];
+        let gotAny = false;
+        for (const [lat, lon] of regions) {
+            try {
+                const url = `https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/250`;
+                const r = await fetch(viaProxy(url));
+                if (!r.ok) continue;
+                const j = await r.json();
+                const entities = [];
+                for (const ac of (j.ac || [])) {
+                    if (ac.lat == null || ac.lon == null) continue;
+                    entities.push({
+                        id: 'a:' + (ac.hex || ac.r || ac.flight || Math.random().toString(36)),
+                        kind: 'air',
+                        callsign: (ac.flight || '').trim() || ac.r || null,
+                        country: icaoCountry(ac.hex),
+                        iso2: null,
+                        lat: ac.lat,
+                        lon: ac.lon,
+                        alt: ac.alt_geom != null ? ac.alt_geom * 0.3048 // ft -> m
+                           : ac.alt_baro != null ? ac.alt_baro * 0.3048 : null,
+                        heading: ac.track != null ? ac.track : ac.true_heading,
+                        speed: ac.gs != null ? ac.gs * 0.5144 : null, // kt -> m/s
+                        type: ac.t || (ac.alt_baro === 'ground' ? 'ground' : 'airborne'),
+                        updated: Math.floor(Date.now() / 1000)
+                    });
+                }
+                if (entities.length) { ingest({ entities }); gotAny = true; }
+            } catch (e) {
+                console.warn('adsb.lol region', lat, lon, 'failed:', e.message);
             }
-            ingest({ entities });
+        }
+        if (gotAny) {
             $('status').textContent = 'DIRECT';
-        } catch (e) {
-            console.warn('OpenSky direct failed:', e.message);
-            $('status').textContent = 'DEGRADED';
+        } else {
+            // Last-ditch: OpenSky anonymous via proxy.
+            try {
+                const r = await fetch(viaProxy('https://opensky-network.org/api/states/all'));
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const raw = await r.json();
+                const entities = [];
+                for (const s of (raw.states || [])) {
+                    const [icao24, callsign, origin_country, , , lon, lat, baro_alt,
+                           on_ground, velocity, true_track, , , geo_alt] = s;
+                    if (lat == null || lon == null) continue;
+                    entities.push({
+                        id: 'a:' + icao24, kind: 'air',
+                        callsign: (callsign || '').trim() || null,
+                        country: origin_country || icaoCountry(icao24),
+                        iso2: null, lat, lon,
+                        alt: geo_alt != null ? geo_alt : baro_alt,
+                        heading: true_track, speed: velocity,
+                        type: on_ground ? 'ground' : 'airborne',
+                        updated: raw.time
+                    });
+                }
+                ingest({ entities });
+                $('status').textContent = 'DIRECT';
+            } catch (e) {
+                console.warn('All aircraft feeds failed:', e.message);
+                $('status').textContent = 'DEGRADED';
+            }
         }
     }
+    // Keep old name for call sites below.
+    const fetchOpenSkyDirect = fetchAircraftDirect;
 
     // ---- Direct AISStream (browser WS, optional) ----------------------------
     // Only activates if window.AISSTREAM_KEY is set. Exposing a key client-side
